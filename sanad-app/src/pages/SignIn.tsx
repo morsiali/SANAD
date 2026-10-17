@@ -39,10 +39,18 @@ export function SignIn() {
     <div className="signin">
       <div className="signin-form">
         <div className="row signin-top">
-          <Link to="/" aria-label="SANAD home">
+          <Link to="/home" aria-label="SANAD home">
             <Logo />
           </Link>
           <LangToggle />
+        </div>
+        <div className="auth-tabs" role="tablist">
+          <span role="tab" aria-selected className="auth-tab on">
+            Sign in
+          </span>
+          <Link to="/register" role="tab" aria-selected={false} className="auth-tab">
+            Create account
+          </Link>
         </div>
         <h1 className="display">Sign in</h1>
         <p className="muted">Use your SANAD account, or pick a demo person on the right.</p>
@@ -62,6 +70,12 @@ export function SignIn() {
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+        <p className="small muted">
+          New to SANAD?{' '}
+          <Link to="/register" className="link">
+            Create an account
+          </Link>
+        </p>
         <p className="small muted">
           Demo password for every account: <code>sanad123</code>
         </p>

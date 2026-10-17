@@ -240,6 +240,7 @@ export type Action =
   | { type: 'mark_read'; notificationId: string | 'all' }
   | { type: 'set_availability'; userId: string; available: boolean }
   | { type: 'update_profile'; name: string; title: string; skills: string[] }
+  | { type: 'update_user'; userId: string; title: string; org: string; skills: string[]; recipients: string[] }
   | { type: 'add_user'; name: string; role: Role; title: string; org: string; email: string; skills: string[]; recipients: string[] }
   | { type: 'upsert_rule'; rule: Omit<Rule, 'id'> & { id?: string } }
   | { type: 'delete_rule'; id: string }

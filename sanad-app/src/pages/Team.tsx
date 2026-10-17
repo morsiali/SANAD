@@ -12,6 +12,7 @@ export function Team() {
   const tab = sp.get('tab') === 'people' ? 'people' : 'team';
   const [role, setRole] = useState<Role | ''>('');
   const [adding, setAdding] = useState<'user' | 'person' | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const isCoord = me.role === 'coordinator';
 
   const people = view.users.filter((u) => (!role || u.role === role) && (me.role !== 'family' || u.role !== 'family' || u.id === me.id));
@@ -104,6 +105,11 @@ export function Team() {
                         {u.available ? 'Available' : 'Away'}
                       </span>
                     )}
+                    {isCoord && u.role !== 'coordinator' && (
+                      <button type="button" className="link small" onClick={() => setEditing(u.id)}>
+                        {t('Edit details')}
+                      </button>
+                    )}
                     {u.role !== 'family' && (
                       <Link to={`/app/intelligence?q=${encodeURIComponent(`Who handles ${u.skills[0] ?? ROLE_LABEL[u.role].toLowerCase()}`)}`} className="link small">
                         Routing check
@@ -154,6 +160,7 @@ export function Team() {
 
       {adding === 'user' && <AddUser onClose={() => setAdding(null)} />}
       {adding === 'person' && <AddPerson onClose={() => setAdding(null)} />}
+      {editing && <EditUser userId={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
@@ -272,6 +279,59 @@ function AddPerson({ onClose }: { onClose: () => void }) {
               {u.name}
             </label>
           ))}
+      </fieldset>
+    </Modal>
+  );
+}
+
+function EditUser({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { view, act } = useSession();
+  const u = view.users.find((x) => x.id === userId)!;
+  const [f, setF] = useState({ title: u.title, org: u.org, skills: u.skills.join(', '), recipients: [...u.recipients] });
+  const save = async () => {
+    const r = await act({ type: 'update_user', userId, title: f.title, org: f.org, skills: f.skills.split(/[,،]/), recipients: f.recipients });
+    if (r.ok) onClose();
+  };
+  return (
+    <Modal
+      title={t('Edit {name}', { name: tc(u.name) })}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-dark" onClick={save}>
+            Save changes
+          </button>
+        </>
+      }
+    >
+      <div className="grid-2">
+        <Field label="Job title">
+          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
+        </Field>
+        <Field label="Organisation">
+          <input value={f.org} onChange={(e) => setF({ ...f, org: e.target.value })} />
+        </Field>
+      </div>
+      {u.role !== 'family' && (
+        <Field label="Skills" hint="Comma separated — used to match problems.">
+          <input value={f.skills} onChange={(e) => setF({ ...f, skills: e.target.value })} />
+        </Field>
+      )}
+      <fieldset className="checks">
+        <legend>{u.role === 'family' ? t('Cares for') : t('Supports')}</legend>
+        {view.recipients.map((r) => (
+          <label key={r.id} className="check">
+            <input
+              type="checkbox"
+              checked={f.recipients.includes(r.id)}
+              onChange={(e) => setF({ ...f, recipients: e.target.checked ? [...f.recipients, r.id] : f.recipients.filter((x) => x !== r.id) })}
+            />
+            {tc(r.name)}
+          </label>
+        ))}
       </fieldset>
     </Modal>
   );

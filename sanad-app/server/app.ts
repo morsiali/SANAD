@@ -3,7 +3,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { apply, sweep, viewFor } from '../shared/engine';
+import { apply, register, sweep, viewFor, type RegisterInput } from '../shared/engine';
 import { createSeed } from '../shared/seed';
 import { EngineError, type Action, type State } from '../shared/types';
 
@@ -115,6 +115,32 @@ export function createApp(opts: AppOptions = {}) {
       return res.status(401).json({ error: 'That email and password do not match. Demo accounts use “sanad123”.' });
     }
     res.json({ token: sign(user.id), userId: user.id });
+  });
+
+  app.post('/api/register', (req, res) => {
+    const body = (req.body ?? {}) as RegisterInput & { password?: string };
+    const password = String(body.password ?? '');
+    if (password.length < 8) return res.status(400).json({ error: 'Use at least 8 characters for the password' });
+    try {
+      const r = register(db.state, {
+        role: body.role,
+        name: String(body.name ?? ''),
+        email: String(body.email ?? ''),
+        title: String(body.title ?? ''),
+        org: String(body.org ?? ''),
+        skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
+        recipient: body.recipient ? { name: String(body.recipient.name ?? ''), age: Number(body.recipient.age), area: String(body.recipient.area ?? ''), note: String(body.recipient.note ?? '') } : undefined,
+      });
+      db.state = r.state;
+      db.credentials[r.userId] = hashPassword(password);
+      save();
+      broadcast();
+      res.json({ token: sign(r.userId), userId: r.userId, m: r.m });
+    } catch (e) {
+      if (e instanceof EngineError) return res.status(e.status).json({ error: e.message, m: e.m });
+      console.error(e);
+      res.status(500).json({ error: 'Something went wrong on the server. Your account was not created.' });
+    }
   });
 
   app.get('/api/state', auth, (req: AuthedRequest, res) => {

@@ -150,7 +150,7 @@ function Frame() {
                   <Link role="menuitem" to="/app/settings">
                     <Icon name="settings" size={16} /> Settings
                   </Link>
-                  <Link role="menuitem" to="/">
+                  <Link role="menuitem" to="/home">
                     <Icon name="home" size={16} /> SANAD website
                   </Link>
                   <button

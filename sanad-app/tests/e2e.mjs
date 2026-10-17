@@ -56,7 +56,7 @@ const modalBtn = (page, name) => page.locator('.modal').getByRole('button', { na
 console.log('\nWebsite');
 const visitor = await person(null);
 await step('landing hero and live routing demo', async () => {
-  await go(visitor, '/');
+  await go(visitor, '/home');
   await text(visitor, 'Every care problem reaches the person who can solve it');
   await visitor.getByLabel('Describe a care problem to see where it goes').fill('The driver never came for the pickup');
   await visitor.locator('.live-node-on', { hasText: 'Transport' }).waitFor();
@@ -363,6 +363,82 @@ await step('mobile: menu drawer opens and navigates', async () => {
   await m.context().close();
 });
 
+console.log('\nStart page');
+await step('a new visit opens on sign-in, and the session ends with the tab', async () => {
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await p.goto(`http://localhost:${PORT}/`);
+  await p.getByRole('heading', { name: 'Sign in' }).waitFor();
+  await p.locator('.acct', { hasText: 'Mariam Al Noor' }).click();
+  await p.waitForURL(/#\/app$/);
+  await p.close();
+  const again = await ctx.newPage();
+  await again.goto(`http://localhost:${PORT}/#/app`);
+  await again.getByRole('heading', { name: 'Sign in' }).waitFor();
+  await again.goto(`http://localhost:${PORT}/#/home`);
+  await again.getByText('Every care problem reaches the person who can solve it').waitFor();
+  await ctx.close();
+});
+
+console.log('\nCreate account');
+await step('a family member signs up with the person they care for and reports a problem', async () => {
+  const p = await person(null);
+  await go(p, '/');
+  await p.getByRole('link', { name: 'Create an account' }).click();
+  await p.getByRole('heading', { name: 'How will you use SANAD?' }).waitFor();
+  await p.getByRole('radio', { name: /Family/ }).click();
+  await p.getByRole('button', { name: 'Continue as Family' }).click();
+  await p.locator('#reg-name').fill('Reem Saleh');
+  await p.locator('#reg-email').fill('reem@example.ae');
+  await p.locator('#reg-password').fill('reem12345');
+  await p.locator('#reg-confirm').fill('reem12345');
+  await p.locator('#reg-rname').fill('Salem Saleh');
+  await p.locator('#reg-rage').fill('81');
+  await p.locator('#reg-rarea').fill('Jumeirah, Dubai');
+  await p.getByRole('button', { name: 'Create account' }).click();
+  await p.getByRole('heading', { level: 1 }).filter({ hasText: 'Reem' }).waitFor();
+  await p.getByText('Salem Saleh').first().waitFor();
+  await go(p, '/app/report');
+  await p.getByLabel('What’s the problem?').fill('Need a ride to the clinic on Monday');
+  await p.locator('.route-preview').getByText('Yousef Karim').waitFor();
+  await btn(p, 'Send to the right person').click();
+  await p.waitForURL(/challenges\/c/);
+  await p.context().close();
+});
+await step('a caregiver signs up; coordinator links them to a family', async () => {
+  const p = await person(null);
+  await go(p, '/register');
+  await p.getByRole('radio', { name: /Caregiver/ }).click();
+  await p.getByRole('button', { name: 'Continue as Caregiver' }).click();
+  await p.locator('#reg-name').fill('Hessa Ali');
+  await p.locator('#reg-email').fill('hessa.ali@example.ae');
+  await p.locator('#reg-password').fill('hessa12345');
+  await p.locator('#reg-confirm').fill('hessa12346');
+  await p.getByText('The passwords do not match').waitFor();
+  if (await btn(p, 'Create account').isEnabled()) throw new Error('should block mismatched passwords');
+  await p.locator('#reg-confirm').fill('hessa12345');
+  await p.locator('#reg-skills').fill('wound, insulin');
+  await btn(p, 'Create account').click();
+  await p.getByRole('heading', { level: 1 }).filter({ hasText: 'Hessa' }).waitFor();
+  await p.context().close();
+  const sara = await person('sara@sanad.ae');
+  await go(sara, '/app/inbox');
+  await sara.getByText('Hessa Ali joined as Caregiver').waitFor();
+  await go(sara, '/app/team');
+  await sara.locator('.person-card', { hasText: 'Hessa Ali' }).getByRole('button', { name: 'Edit details' }).click();
+  await sara.locator('.modal').getByLabel('Fatima Al Noor').check();
+  await modalBtn(sara, 'Save changes').click();
+  await text(sara, 'Hessa Ali updated');
+  await sara.locator('.person-card', { hasText: 'Hessa Ali' }).getByText('Supports Fatima').waitFor();
+  await sara.context().close();
+});
+await step('coordinator accounts cannot be self-registered', async () => {
+  const p = await person(null);
+  await go(p, '/register');
+  if (await p.getByRole('radio', { name: /Care coordinator/ }).isEnabled()) throw new Error('coordinator should be invite-only');
+  await p.context().close();
+});
+
 console.log('\nWorkflow');
 await step('in-app workflow map shows live counts and step details', async () => {
   const p = await person('sara@sanad.ae');
@@ -391,7 +467,7 @@ await step('role filter highlights each role’s part', async () => {
 });
 await step('public workflow page works without signing in', async () => {
   const p = await person(null);
-  await go(p, '/');
+  await go(p, '/home');
   await p.getByRole('link', { name: 'See the full workflow' }).click();
   await p.getByRole('heading', { name: 'How SANAD works' }).waitFor();
   await p.getByRole('button', { name: 'Pick the best person' }).click();
@@ -410,14 +486,15 @@ const englishLeft = async (page) =>
       if (!el || el.closest('script,style,svg,[data-raw],code,input,textarea')) continue;
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) continue;
-      const words = n.nodeValue.split(/[\s·,()“”«»:]+/).filter((x) => /[A-Za-z]{3,}/.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN)$/.test(x));
+      const typed = /^(Hessa|Ali|Reem|Salem|Saleh)$/; // names entered by people who signed up during this run
+      const words = n.nodeValue.split(/[\s·,()“”«»:]+/).filter((x) => /[A-Za-z]{3,}/.test(x) && !typed.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN)$/.test(x));
       if (words.length) out.push(n.nodeValue.trim());
     }
     return out;
   });
 await step('language switch turns the site Arabic and right-to-left', async () => {
   const p = await person(null);
-  await go(p, '/');
+  await go(p, '/home');
   await p.getByRole('button', { name: 'التبديل إلى العربية' }).click();
   await p.getByText('كل مشكلة رعاية تصل إلى من يستطيع حلها').waitFor();
   if ((await p.evaluate(() => document.documentElement.dir)) !== 'rtl') throw new Error('not rtl');

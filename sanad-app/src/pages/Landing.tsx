@@ -12,7 +12,7 @@ import { Avatar, Icon, Logo, PriorityPill, Sparkle } from '../components/ui';
 
 const EXAMPLES = ['Mum’s insulin pens are running low', 'The driver didn’t come for dad’s dialysis pickup', 'Grandma slipped in the bathroom this morning', 'Her Thiqa card expires next week'];
 
-const ROLE_PITCH: { role: Role; email: string; head: string; text: string; tags: [string, string][] }[] = [
+export const ROLE_PITCH: { role: Role; email: string; head: string; text: string; tags: [string, string][] }[] = [
   { role: 'family', email: 'mariam@sanad.ae', head: 'Peace of mind, without the phone calls', text: 'Say what’s wrong in your own words. SANAD finds the person who can fix it, shows you every step, and asks you to confirm when it’s really solved.', tags: [['plus', 'One-tap reporting'], ['eye', 'Live progress'], ['check', 'You confirm the fix'], ['users', 'Whole care team in view']] },
   { role: 'caregiver', email: 'aisha@sanad.ae', head: 'Your day, in the order that matters', text: 'Problems for the people you visit arrive with history attached, ranked by urgency. Apply a proven checklist and close the loop with the family.', tags: [['layers', 'Ranked queue'], ['book', 'Proven checklists'], ['handoff', 'Hand off in one step'], ['clock', 'Response-time clock']] },
   { role: 'doctor', email: 'kareem@sanad.ae', head: 'Only the clinical questions reach you', text: 'Refills go to the pharmacy and rides go to transport. What lands with you is clinical, prioritised, and comes with readings and context.', tags: [['stethoscope', 'Clinical triage'], ['flag', 'Safety signals raised'], ['chat', 'One thread per problem'], ['users', 'Continuity of care']] },
@@ -69,7 +69,7 @@ export function Landing() {
   return (
     <div className="site">
       <header className="site-nav">
-        <Link to="/" aria-label="SANAD home">
+        <Link to="/home" aria-label="SANAD home">
           <Logo />
         </Link>
         <nav aria-label="Website">
@@ -90,7 +90,7 @@ export function Landing() {
               <Link to="/signin" className="btn btn-outline btn-sm">
                 Sign in
               </Link>
-              <Link to="/signin" className="btn btn-dark btn-sm hide-s">
+              <Link to="/register" className="btn btn-dark btn-sm hide-s">
                 Get started
               </Link>
             </>
@@ -103,7 +103,7 @@ export function Landing() {
         <h1 className="display-xl">Every care problem reaches the person who can solve it</h1>
         <p className="lede center">SANAD connects families, carers, doctors, pharmacies, drivers and social services. Describe a problem once — it’s routed, tracked and solved.</p>
         <div className="row gap-s center">
-          <Link to="/signin" className="btn btn-dark btn-lg">
+          <Link to="/register" className="btn btn-dark btn-lg">
             Get started
           </Link>
           <a href="#how" className="btn btn-light btn-lg">
@@ -244,7 +244,7 @@ export function Landing() {
         <div className="cta-panel">
           <h2 className="display-l">Take the weight off the family</h2>
           <p className="lede center">Pick a demo account and see SANAD from any seat in the care circle.</p>
-          <Link to="/signin" className="btn btn-dark btn-lg">
+          <Link to="/register" className="btn btn-dark btn-lg">
             Get started
           </Link>
         </div>
@@ -265,6 +265,7 @@ export function Landing() {
         <nav aria-label="Get started">
           <strong>Get started</strong>
           <Link to="/signin">Sign in</Link>
+          <Link to="/register">Create account</Link>
           <a href="#faq">Questions</a>
           <button type="button" className="linkish" onClick={() => tryAs('mariam@sanad.ae')}>
             Try as a family member

@@ -516,6 +516,18 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       break;
     }
 
+    case 'update_user': {
+      if (!isCoordinator(me)) throw fail('e_add_team', undefined, 403);
+      const target = getUser(state, action.userId);
+      target.title = action.title.trim() || ROLE_LABEL[target.role];
+      target.org = action.org.trim();
+      target.skills = action.skills.map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 12);
+      target.recipients = action.recipients.filter((r) => state.recipients.some((x) => x.id === r));
+      notify(state, [target.id], null, msg('n_profile_updated', { name: me.name }), 'system', now, me.id);
+      m = msg('m_user_updated', { name: target.name });
+      break;
+    }
+
     case 'add_recipient': {
       if (!isCoordinator(me)) throw fail('e_add_recipient', undefined, 403);
       const name = requireText(action.name, 'lbl_name', 2);
@@ -674,4 +686,65 @@ export function initialsOf(name: string): string {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? '')
     .join('');
+}
+
+// ---------------------------------------------------------------- self sign-up
+export const SELF_SIGNUP_ROLES: Role[] = ['family', 'caregiver', 'doctor', 'transport', 'pharmacy', 'social'];
+
+export interface RegisterInput {
+  role: Role;
+  name: string;
+  email: string;
+  title?: string;
+  org?: string;
+  skills?: string[];
+  /** Family only: the person they care for. */
+  recipient?: { name: string; age: number; area: string; note?: string };
+}
+
+export interface RegisterResult {
+  state: State;
+  userId: string;
+  recipientId?: string;
+  m: Msg;
+}
+
+/** Creates an account for a new person. Pure: returns a new state, throws EngineError on invalid input. */
+export function register(prev: State, input: RegisterInput, now = Date.now()): RegisterResult {
+  const state = clone(prev);
+  if (!SELF_SIGNUP_ROLES.includes(input.role)) throw fail('e_signup_role', undefined, 403);
+  const name = requireText(input.name, 'lbl_name', 2);
+  const email = requireText(input.email, 'lbl_email', 5).toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw fail('e_email');
+  if (state.users.some((u) => u.email.toLowerCase() === email)) throw fail('e_email_taken', undefined, 409);
+
+  let recipientId: string | undefined;
+  if (input.role === 'family') {
+    const r = input.recipient;
+    const rName = requireText(r?.name, 'lbl_recipient', 2);
+    const age = Math.round(Number(r?.age));
+    if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
+    recipientId = nextId(state, 'r');
+    state.recipients.push({ id: recipientId, name: rName, age, area: (r?.area ?? '').trim(), note: (r?.note ?? '').trim() });
+  }
+
+  const user: User = {
+    id: nextId(state, 'u'),
+    name,
+    role: input.role,
+    title: (input.title ?? '').trim() || ROLE_LABEL[input.role],
+    org: (input.org ?? '').trim() || (input.role === 'family' ? 'Family' : ''),
+    email,
+    initials: initialsOf(name),
+    color: PALETTE[state.users.length % PALETTE.length],
+    available: true,
+    skills: (input.skills ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 12),
+    recipients: recipientId ? [recipientId] : [],
+  };
+  state.users.push(user);
+  notify(state, [user.id], null, msg('n_signup_welcome', { first: name.split(' ')[0], role: user.role }), 'system', now);
+  notify(state, coordinators(state), null, msg(recipientId ? 'n_signup_family' : 'n_signup_staff', { name, role: user.role, recipient: input.recipient?.name ?? '' }), 'system', now);
+  if (user.role !== 'family') pickUpQueue(state, now);
+  state.version += 1;
+  return { state, userId: user.id, recipientId, m: msg('m_signed_up', { first: name.split(' ')[0] }) };
 }

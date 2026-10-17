@@ -33,7 +33,7 @@ export function PublicWorkflow({ standalone = false }: { standalone?: boolean })
         {standalone ? (
           <Logo />
         ) : (
-          <Link to="/" aria-label="SANAD home">
+          <Link to="/home" aria-label="SANAD home">
             <Logo />
           </Link>
         )}

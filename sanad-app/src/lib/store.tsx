@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Action, Msg, User, View } from '../../shared/types';
+import type { RegisterInput } from '../../shared/engine';
 import { ApiError, getBackend, type Backend } from './backend';
 
 const SESSION_KEY = 'sanad.session.v1';
@@ -20,6 +21,7 @@ interface Ctx {
   now: number;
   toasts: Toast[];
   signIn(email: string, password: string): Promise<void>;
+  signUp(input: RegisterInput & { password: string }): Promise<void>;
   signOut(): void;
   act(action: Action, opts?: { quiet?: boolean }): Promise<{ ok: boolean; createdId?: string; message?: string }>;
   refresh(): Promise<void>;
@@ -29,17 +31,18 @@ interface Ctx {
 
 const AppCtx = createContext<Ctx | null>(null);
 
-// Each tab keeps its own session (so two people can be signed in side by side);
-// new tabs start from the most recent sign-in.
+// A session lives only as long as the browser tab: every new visit starts at sign-in,
+// and each tab can be signed in as a different person.
 function readSession(): string | null {
   try {
-    return sessionStorage.getItem(SESSION_KEY) ?? localStorage.getItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY); // sessions from older versions persisted here
+    return sessionStorage.getItem(SESSION_KEY);
   } catch {
     return null;
   }
 }
 function writeSession(token: string | null) {
-  for (const store of [() => sessionStorage, () => localStorage]) {
+  for (const store of [() => sessionStorage]) {
     try {
       if (token) store().setItem(SESSION_KEY, token);
       else store().removeItem(SESSION_KEY);
@@ -122,6 +125,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [backend],
   );
 
+  const signUp = useCallback(
+    async (input: RegisterInput & { password: string }) => {
+      const b = backend ?? (await getBackend());
+      const res = await b.register(input);
+      const v = await b.load(res.token);
+      writeSession(res.token);
+      setView(v);
+      setToken(res.token);
+    },
+    [backend],
+  );
+
   const act = useCallback<Ctx['act']>(
     async (action, opts) => {
       if (!backend || !token) return { ok: false };
@@ -141,7 +156,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const me = useMemo(() => view?.users.find((u) => u.id === view.me) ?? null, [view]);
 
-  const value: Ctx = { backend, token, view, me, ready: ready && !!backend, now, toasts, signIn, signOut, act, refresh, toast, replaceView: setView };
+  const value: Ctx = { backend, token, view, me, ready: ready && !!backend, now, toasts, signIn, signUp, signOut, act, refresh, toast, replaceView: setView };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
 

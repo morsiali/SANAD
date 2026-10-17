@@ -1,7 +1,7 @@
 // Two interchangeable backends with one interface:
 //  - server: the Express API (multi-user, persisted to disk, live updates over SSE)
 //  - browser: the same engine running locally, persisted to localStorage, synced across tabs
-import { apply, sweep, viewFor } from '../../shared/engine';
+import { apply, register, sweep, viewFor, type RegisterInput } from '../../shared/engine';
 import { createSeed } from '../../shared/seed';
 import type { Action, Msg, Role, State, View } from '../../shared/types';
 
@@ -29,6 +29,7 @@ export interface Backend {
   mode: 'server' | 'browser';
   accounts(): Promise<Account[]>;
   login(email: string, password: string): Promise<{ token: string; userId: string }>;
+  register(input: RegisterInput & { password: string }): Promise<{ token: string; userId: string }>;
   load(token: string): Promise<View>;
   act(token: string, action: Action): Promise<ActResult>;
   subscribe(token: string, onChange: () => void): () => void;
@@ -66,6 +67,7 @@ function serverBackend(): Backend {
     mode: 'server',
     accounts: () => call('/api/accounts'),
     login: (email, password) => call('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+    register: (input) => call('/api/register', { method: 'POST', body: JSON.stringify(input) }),
     load: (token) => call('/api/state', { token }),
     act: (token, action) => call('/api/action', { method: 'POST', token, body: JSON.stringify({ action }) }),
     changePassword: async (token, current, next) => (await call<{ message: string }>('/api/password', { method: 'POST', token, body: JSON.stringify({ current, next }) })).message,
@@ -184,6 +186,18 @@ function browserBackend(): Backend {
       const u = s.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
       if (!u || (creds[u.id] ?? DEMO_PASSWORD) !== password) throw new ApiError('That email and password do not match. Demo accounts use “sanad123”.', 401);
       return { token: u.id, userId: u.id };
+    },
+    async register(input) {
+      if (input.password.length < 8) throw new ApiError('Use at least 8 characters for the password', 400);
+      try {
+        const r = register(read(), input);
+        creds[r.userId] = input.password;
+        write(r.state);
+        return { token: r.userId, userId: r.userId };
+      } catch (e) {
+        const err = e as Error & { status?: number; m?: Msg };
+        throw new ApiError(err.message, err.status ?? 400, err.m);
+      }
     },
     async load(token) {
       const s = read();

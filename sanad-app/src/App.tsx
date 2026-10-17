@@ -16,6 +16,7 @@ import { Analytics } from './pages/Analytics';
 import { Inbox } from './pages/Inbox';
 import { SettingsPage } from './pages/Settings';
 import { PublicWorkflow, WorkflowPage } from './pages/Workflow';
+import { Register } from './pages/Register';
 
 function NotFound() {
   return (
@@ -30,9 +31,11 @@ export default function App() {
     <AppProvider>
       <HashRouter>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<SignIn />} />
           <Route path="/signin" element={<SignIn />} />
+          <Route path="/home" element={<Landing />} />
           <Route path="/workflow" element={<PublicWorkflow />} />
+          <Route path="/register" element={<Register />} />
           <Route path="/app" element={<Shell />}>
             <Route index element={<Dashboard />} />
             <Route path="challenges" element={<Challenges />} />
@@ -48,7 +51,7 @@ export default function App() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
-          <Route path="*" element={<Landing />} />
+          <Route path="*" element={<SignIn />} />
         </Routes>
         <Toasts />
       </HashRouter>

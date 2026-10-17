@@ -66,6 +66,20 @@ describe('API', () => {
     expect(await login('hessa@sanad.ae')).toBeTruthy();
   });
 
+  it('registers new people who can then sign in', async () => {
+    const short = await request(app).post('/api/register').send({ role: 'family', name: 'Reem Saleh', email: 'reem@example.ae', password: 'short', recipient: { name: 'Salem', age: 80, area: '' } });
+    expect(short.status).toBe(400);
+    const coord = await request(app).post('/api/register').send({ role: 'coordinator', name: 'X Y', email: 'xy@example.ae', password: 'longenough' });
+    expect(coord.status).toBe(403);
+    const ok = await request(app).post('/api/register').send({ role: 'family', name: 'Reem Saleh', email: 'reem@example.ae', password: 'reem12345', recipient: { name: 'Salem Saleh', age: 80, area: 'Jumeirah' } });
+    expect(ok.status).toBe(200);
+    const state = await request(app).get('/api/state').set('Authorization', `Bearer ${ok.body.token}`);
+    expect(state.body.recipients.some((r: { name: string }) => r.name === 'Salem Saleh')).toBe(true);
+    expect(await login('reem@example.ae', 'reem12345')).toBeTruthy();
+    const dup = await request(app).post('/api/register').send({ role: 'doctor', name: 'Again', email: 'reem@example.ae', password: 'reem12345' });
+    expect(dup.status).toBe(409);
+  });
+
   it('changes passwords', async () => {
     const token = await login('noura@sanad.ae');
     const bad = await request(app).post('/api/password').set('Authorization', `Bearer ${token}`).send({ current: 'x', next: 'longenough' });
