@@ -75,6 +75,7 @@ export function Landing() {
         <nav aria-label="Website">
           <a href="#teams">Who it’s for</a>
           <a href="#how">How it works</a>
+          <Link to="/workflow">Workflow</Link>
           <a href="#intelligence">Intelligence</a>
           <a href="#faq">Questions</a>
         </nav>
@@ -190,6 +191,11 @@ export function Landing() {
             </li>
           ))}
         </ol>
+        <div className="row center wf-cta">
+          <Link to="/workflow" className="btn btn-light">
+            See the full workflow
+          </Link>
+        </div>
       </section>
 
       <section id="intelligence" className="site-sec">
@@ -253,6 +259,7 @@ export function Landing() {
           <strong>Product</strong>
           <a href="#teams">Who it’s for</a>
           <a href="#how">How it works</a>
+          <Link to="/workflow">Workflow</Link>
           <a href="#intelligence">Intelligence</a>
         </nav>
         <nav aria-label="Get started">

@@ -59,6 +59,7 @@ function Frame() {
     { to: '/app', icon: 'home', label: 'Dashboard', end: true },
     { to: '/app/challenges', icon: 'layers', label: 'Challenges', badge: mine + toConfirm + triage || undefined },
     { to: '/app/report', icon: 'plus', label: 'Report a challenge' },
+    { to: '/app/workflow', icon: 'map', label: 'How SANAD works' },
     { to: '/app/intelligence', icon: 'sparkle', label: 'Ask SANAD' },
     { to: '/app/playbooks', icon: 'book', label: 'Playbooks' },
     { to: '/app/inbox', icon: 'inbox', label: 'Inbox', badge: unread || undefined },

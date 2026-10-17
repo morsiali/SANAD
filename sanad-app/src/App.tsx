@@ -15,6 +15,7 @@ import { Routing } from './pages/Routing';
 import { Analytics } from './pages/Analytics';
 import { Inbox } from './pages/Inbox';
 import { SettingsPage } from './pages/Settings';
+import { PublicWorkflow, WorkflowPage } from './pages/Workflow';
 
 function NotFound() {
   return (
@@ -31,11 +32,13 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/signin" element={<SignIn />} />
+          <Route path="/workflow" element={<PublicWorkflow />} />
           <Route path="/app" element={<Shell />}>
             <Route index element={<Dashboard />} />
             <Route path="challenges" element={<Challenges />} />
             <Route path="challenges/:id" element={<ChallengeDetail />} />
             <Route path="report" element={<Report />} />
+            <Route path="workflow" element={<WorkflowPage />} />
             <Route path="intelligence" element={<Intelligence />} />
             <Route path="playbooks" element={<Playbooks />} />
             <Route path="team" element={<Team />} />

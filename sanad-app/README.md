@@ -30,6 +30,16 @@ The coordinator can reset the demo from Settings.
 `npm run build:demo` writes `dist-demo/index.html` — the whole app in one file, running the same
 engine in the browser with data saved in local storage. Open it directly in a browser.
 
+## Workflow
+
+The whole process is drawn as a swimlane map — in the app under **How SANAD works** (with live counts
+for every step and links to the matching challenges) and publicly at `#/workflow`, no sign-in needed.
+`npm run build:workflow` writes the map as a single shareable file, `dist-workflow/workflow.html`.
+
+Reported → Routed (rule match → availability → best person, or coordinator triage / team queue)
+→ Accepted → In progress → Resolved → Confirmed by the family → Closed. Exceptions: hand off
+(back to routing), missed response time (escalation to the coordinator), not fixed (reopen).
+
 ## Languages
 
 English and Arabic, with a full right-to-left layout. Use the language button in the top bar, or
@@ -48,7 +58,7 @@ Settings → Pages → Build and deployment → Source: **GitHub Actions**.
 ```bash
 npm test           # 43 unit + API tests (routing, workflow, permissions, SLA, intelligence, auth, Arabic)
 npm run typecheck
-npm run build && npm run e2e   # 38 end-to-end checks in Chromium, several users at once, English and Arabic
+npm run build && npm run e2e   # 41 end-to-end checks in Chromium, several users at once, English and Arabic
 ```
 `npm run e2e` uses Playwright. The first time, run `npx playwright install chromium`.
 

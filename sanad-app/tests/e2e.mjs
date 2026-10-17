@@ -363,6 +363,42 @@ await step('mobile: menu drawer opens and navigates', async () => {
   await m.context().close();
 });
 
+console.log('\nWorkflow');
+await step('in-app workflow map shows live counts and step details', async () => {
+  const p = await person('sara@sanad.ae');
+  await p.locator('.side-nav a[href="#/app/workflow"]').click();
+  await p.getByRole('heading', { name: 'How SANAD works' }).waitFor();
+  if ((await p.locator('.wf-node').count()) !== 13) throw new Error('expected 13 steps');
+  if (!(await p.locator('.wf-count').count())) throw new Error('no live counts');
+  await p.getByRole('button', { name: 'Review escalation' }).click();
+  await p.locator('.wf-detail h3', { hasText: 'Review escalation' }).waitFor();
+  await p.getByRole('button', { name: 'Next step' }).click();
+  await p.locator('.wf-detail h3', { hasText: 'Resolve with a note' }).waitFor();
+  await p.getByRole('button', { name: 'Review escalation' }).click();
+  await p.getByRole('link', { name: 'Open these challenges' }).click();
+  await p.waitForURL(/flag=escalated/);
+  await p.context().close();
+});
+await step('role filter highlights each role’s part', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/workflow');
+  await p.locator('.wf-roles').getByRole('button', { name: 'Family', exact: true }).waitFor();
+  const dimmed = await p.locator('.wf-node.wf-dim').count();
+  if (!dimmed) throw new Error('family view should dim team-only steps');
+  await p.locator('.wf-roles').getByRole('button', { name: 'Everyone' }).click();
+  if (await p.locator('.wf-node.wf-dim').count()) throw new Error('everyone view should show all steps');
+  await p.context().close();
+});
+await step('public workflow page works without signing in', async () => {
+  const p = await person(null);
+  await go(p, '/');
+  await p.getByRole('link', { name: 'See the full workflow' }).click();
+  await p.getByRole('heading', { name: 'How SANAD works' }).waitFor();
+  await p.getByRole('button', { name: 'Pick the best person' }).click();
+  await p.getByText('Chooses the available person with matching skills').waitFor();
+  await p.context().close();
+});
+
 console.log('\nArabic');
 const englishLeft = async (page) =>
   page.evaluate(() => {

@@ -4,10 +4,14 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 
 // `npm run build` → dist/ served by the API server (full-stack mode).
 // `npm run build:demo` → one self-contained HTML file that runs entirely in the browser.
+// `npm run build:workflow` → the workflow map as one self-contained HTML file.
 export default defineConfig(({ mode }) => ({
-  plugins: mode === 'demo' ? [react(), viteSingleFile()] : [react()],
-  define: { __SANAD_MODE__: JSON.stringify(mode === 'demo' ? 'demo' : 'auto') },
-  build: { outDir: mode === 'demo' ? 'dist-demo' : 'dist', emptyOutDir: true },
+  plugins: mode === 'demo' || mode === 'workflow' ? [react(), viteSingleFile()] : [react()],
+  define: { __SANAD_MODE__: JSON.stringify(mode === 'demo' || mode === 'workflow' ? 'demo' : 'auto') },
+  build:
+    mode === 'workflow'
+      ? { outDir: 'dist-workflow', emptyOutDir: true, rollupOptions: { input: 'workflow.html' } }
+      : { outDir: mode === 'demo' ? 'dist-demo' : 'dist', emptyOutDir: true },
   server: { port: 5173, proxy: { '/api': { target: 'http://localhost:4000', changeOrigin: true } } },
   test: { environment: 'node', include: ['tests/**/*.test.ts'] },
 }));

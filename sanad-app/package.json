@@ -2,7 +2,7 @@
   "name": "sanad",
   "version": "1.0.0",
   "private": true,
-  "description": "SANAD — care challenges routed to the people who can solve them.",
+  "description": "SANAD \u2014 care challenges routed to the people who can solve them.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
@@ -14,7 +14,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build:demo": "vite build --mode demo",
-    "e2e": "node tests/e2e.mjs"
+    "e2e": "node tests/e2e.mjs",
+    "build:workflow": "vite build --mode workflow"
   },
   "dependencies": {
     "express": "^4.21.2",
