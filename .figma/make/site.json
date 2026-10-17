@@ -1,0 +1,10 @@
+{
+  "description": "Streamline website project creation with intuitive tools that guide users through design and development for efficient, professional results.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
