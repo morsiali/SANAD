@@ -15,6 +15,7 @@ import {
 } from './types';
 import { computeLoads, decideRouting, isActive, selectAssignee } from './routing';
 import { en, msg } from './messages';
+import { cleanProfile, type ProfileInput } from './care';
 
 const fail = (k: string, p?: Record<string, string | number>, status = 400) => {
   const m = msg(k, p);
@@ -155,7 +156,7 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       if (me.role === 'family' && !me.recipients.includes(recipient.id)) throw fail('e_family_only', undefined, 403);
       const decision = decideRouting(
         { title, description, recipientId: recipient.id, priority: action.priority, category: action.category },
-        { users: state.users, rules: state.rules, settings: state.settings, loads: computeLoads(state.users, state.challenges) },
+        { users: state.users, rules: state.rules, settings: state.settings, loads: computeLoads(state.users, state.challenges), recipients: state.recipients },
       );
       const n = state.challenges.reduce((m, c) => Math.max(m, Number(c.ref.split('-')[1]) || 0), 1000) + 1;
       const c: Challenge = {
@@ -534,13 +535,30 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       const age = Math.round(Number(action.age));
       if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
       const id = nextId(state, 'r');
-      state.recipients.push({ id, name, age, area: action.area.trim(), note: action.note.trim() });
+      const note = action.note.trim();
+      state.recipients.push({ id, name, age, area: action.area.trim(), note, ...cleanProfile(action, age, note) });
       for (const fid of action.familyIds) {
         const f = state.users.find((u) => u.id === fid);
         if (f && !f.recipients.includes(id)) f.recipients.push(id);
       }
       createdId = id;
       m = msg('m_added', { name });
+      break;
+    }
+
+    case 'update_recipient': {
+      const r = state.recipients.find((x) => x.id === action.recipientId);
+      if (!r) throw fail('e_who');
+      if (!isCoordinator(me) && !(me.role === 'family' && me.recipients.includes(r.id))) throw fail('e_edit_recipient', undefined, 403);
+      const age = Math.round(Number(action.age));
+      if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
+      r.age = age;
+      r.area = (action.area ?? '').trim();
+      r.note = (action.note ?? '').trim();
+      Object.assign(r, cleanProfile({ support: action.support, living: action.living, needs: action.needs ?? [] }, age, r.note));
+      const others = state.users.filter((u) => u.id !== me.id && (u.recipients.includes(r.id) || u.role === 'coordinator')).map((u) => u.id);
+      notify(state, others, null, msg('n_recipient_updated', { name: me.name, recipient: r.name }), 'update', now);
+      m = msg('m_recipient_updated', { name: r.name });
       break;
     }
 
@@ -699,7 +717,7 @@ export interface RegisterInput {
   org?: string;
   skills?: string[];
   /** Family only: the person they care for. */
-  recipient?: { name: string; age: number; area: string; note?: string };
+  recipient?: { name: string; age: number; area: string; note?: string } & ProfileInput;
 }
 
 export interface RegisterResult {
@@ -725,7 +743,8 @@ export function register(prev: State, input: RegisterInput, now = Date.now()): R
     const age = Math.round(Number(r?.age));
     if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
     recipientId = nextId(state, 'r');
-    state.recipients.push({ id: recipientId, name: rName, age, area: (r?.area ?? '').trim(), note: (r?.note ?? '').trim() });
+    const note = (r?.note ?? '').trim();
+    state.recipients.push({ id: recipientId, name: rName, age, area: (r?.area ?? '').trim(), note, ...cleanProfile(r, age, note) });
   }
 
   const user: User = {

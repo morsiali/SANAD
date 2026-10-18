@@ -9,6 +9,7 @@ import { t, tm } from '../lib/i18n';
 import { ROLE_ICON } from '../lib/format';
 import { ROLE_PITCH } from './Landing';
 import { Field, Icon, Logo, Sparkle } from '../components/ui';
+import { CareProfileFields, emptyDraft, type ProfileDraft } from '../components/CareProfile';
 
 const ROLE_BLURB: Record<Role, string> = {
   family: 'I look after a parent or relative',
@@ -41,6 +42,7 @@ export function Register() {
   const [step, setStep] = useState<1 | 2>(1);
   const [role, setRole] = useState<Role>('family');
   const [f, setF] = useState({ name: '', email: '', password: '', confirm: '', title: '', org: '', skills: '', rName: '', rAge: '', rArea: '', rNote: '' });
+  const [care, setCare] = useState<ProfileDraft>(emptyDraft);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
@@ -71,7 +73,7 @@ export function Register() {
         title: f.title,
         org: f.org,
         skills: f.skills.split(/[,،]/),
-        recipient: isFamily ? { name: f.rName, age: Number(f.rAge), area: f.rArea, note: f.rNote } : undefined,
+        recipient: isFamily ? { name: f.rName, age: Number(f.rAge), area: f.rArea, note: f.rNote, support: care.support, living: care.living, needs: care.needs } : undefined,
       });
       nav('/app');
     } catch (err) {
@@ -168,9 +170,10 @@ export function Register() {
                 <Field label={t('Area')}>
                   <input id="reg-rarea" value={f.rArea} onChange={set('rArea')} placeholder={t('e.g. Jumeirah, Dubai')} />
                 </Field>
-                <Field label={t('Anything the care team should know')} hint={t('Optional — for example mobility, conditions or who lives with them.')}>
+                <Field label={t('Anything the care team should know')} hint={t('Optional — for example mobility, conditions or who lives with them. We use it to suggest a care category below.')}>
                   <textarea id="reg-rnote" rows={2} value={f.rNote} onChange={set('rNote')} />
                 </Field>
+                <CareProfileFields value={care} onChange={setCare} note={f.rNote} age={Number(f.rAge) || 0} idPrefix="reg-care" />
               </fieldset>
             ) : (
               <fieldset className="reg-group">

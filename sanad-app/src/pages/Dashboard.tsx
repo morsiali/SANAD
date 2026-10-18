@@ -11,6 +11,7 @@ import { greeting, firstName, recipientName, timeAgo } from '../lib/format';
 import { ROLE_CONFIG } from '../lib/roles';
 import { useActions } from '../components/actions';
 import { Avatar, ChallengeRow, Empty, Icon, Sparkle } from '../components/ui';
+import { CareTags } from '../components/CareProfile';
 
 export function Dashboard() {
   const { view, me, now } = useSession();
@@ -235,6 +236,7 @@ function PeoplePanel() {
             <span className="person-body">
               <strong>{r.name}</strong>
               <small>{t('Age {age} · {area}', { age: r.age, area: tc(r.area) })}</small>
+              <CareTags r={r} compact />
               <span className="person-stats">
                 {open.length ? t('{n} open · {h} high priority', { n: open.length, h: open.filter((c) => c.priority === 'urgent' || c.priority === 'high').length }) : t('No open challenges')}
               </span>

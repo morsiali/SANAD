@@ -124,9 +124,9 @@ export function createSeed(now = Date.now()): State {
     seq: 100,
     users: JSON.parse(JSON.stringify(users)),
     recipients: [
-      { id: 'r-fatima', name: 'Fatima Al Noor', age: 72, area: 'Al Barsha, Dubai', note: 'Lives with her daughter Mariam. Type 2 diabetes, uses a walker.' },
-      { id: 'r-hamad', name: 'Hamad Al Mansoori', age: 80, area: 'Mirdif, Dubai', note: 'Wheelchair user, dialysis three times a week. Son Khalid visits daily.' },
-      { id: 'r-khadija', name: 'Khadija Saeed', age: 68, area: 'Al Qusais, Dubai', note: 'Recovering from knee surgery. Lives alone.' },
+      { id: 'r-fatima', name: 'Fatima Al Noor', age: 72, area: 'Al Barsha, Dubai', note: 'Lives with her daughter Mariam. Type 2 diabetes, uses a walker.', support: 'assisted', living: 'family', needs: ['chronic', 'mobility'] },
+      { id: 'r-hamad', name: 'Hamad Al Mansoori', age: 80, area: 'Mirdif, Dubai', note: 'Wheelchair user, dialysis three times a week. Son Khalid visits daily.', support: 'high', living: 'family', needs: ['mobility', 'renal'] },
+      { id: 'r-khadija', name: 'Khadija Saeed', age: 68, area: 'Al Qusais, Dubai', note: 'Recovering from knee surgery. Lives alone.', support: 'assisted', living: 'alone', needs: ['recovery', 'mobility'] },
     ],
     challenges: [],
     rules: JSON.parse(JSON.stringify(rules)),

@@ -7,6 +7,7 @@ import { recommendFor, similarResolved } from '../../shared/intelligence';
 import { useSession } from '../lib/store';
 import { t, tc, tm, tn } from '../lib/i18n';
 import { dateTime, recipientName, timeAgo } from '../lib/format';
+import { CareTags } from '../components/CareProfile';
 import { useActions, type RunKind } from '../components/actions';
 import { Avatar, Empty, Icon, Meter, PriorityPill, RoleTag, SlaBadge, Sparkle, StagePill, Stepper } from '../components/ui';
 
@@ -318,7 +319,8 @@ function Detail({ c }: { c: Challenge }) {
               <dt>For</dt>
               <dd>
                 <Link to={`/app/challenges?person=${c.recipientId}`}>{recipientName(view, c.recipientId)}</Link>
-                {recipient && <small> · {recipient.area}</small>}
+                {recipient && <small> · {tc(recipient.area)}</small>}
+                {recipient && <CareTags r={recipient} compact />}
               </dd>
               <dt>Respond by</dt>
               <dd>{dateTime(c.dueAt)}</dd>

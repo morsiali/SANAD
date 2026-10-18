@@ -5,6 +5,9 @@ import { isActive } from '../../shared/routing';
 import { useSession } from '../lib/store';
 import { t, tc, tm, tn } from '../lib/i18n';
 import { Avatar, Empty, Field, Icon, Modal, RoleTag } from '../components/ui';
+import { CareProfileFields, CareTags, draftFrom, emptyDraft, type ProfileDraft } from '../components/CareProfile';
+import { AGE_GROUPS, AGE_LABEL, CARE_NEEDS, LIVINGS, LIVING_LABEL, NEED_ICON, NEED_LABEL, SUPPORT_HINT, SUPPORT_LABEL, SUPPORT_LEVELS, careProfile, type CareProfile } from '../../shared/care';
+import type { Recipient } from '../../shared/types';
 
 export function Team() {
   const { view, me, act } = useSession();
@@ -13,6 +16,7 @@ export function Team() {
   const [role, setRole] = useState<Role | ''>('');
   const [adding, setAdding] = useState<'user' | 'person' | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [editingPerson, setEditingPerson] = useState<string | null>(null);
   const isCoord = me.role === 'coordinator';
 
   const people = view.users.filter((u) => (!role || u.role === role) && (me.role !== 'family' || u.role !== 'family' || u.id === me.id));
@@ -121,46 +125,14 @@ export function Team() {
             })}
           </div>
         </>
-      ) : recipients.length ? (
-        <div className="team-grid">
-          {recipients.map((r) => {
-            const open = view.challenges.filter((c) => c.recipientId === r.id && isActive(c));
-            const family = view.users.filter((u) => u.role === 'family' && u.recipients.includes(r.id));
-            const carers = view.users.filter((u) => u.role !== 'family' && u.recipients.includes(r.id));
-            return (
-              <article key={r.id} className="person-card">
-                <header>
-                  <span className="person-ava">{r.name[0]}</span>
-                  <span>
-                    <strong>{r.name}</strong>
-                    <small>
-                      {t('Age {age} · {area}', { age: r.age, area: tc(r.area) })}
-                    </small>
-                  </span>
-                </header>
-                {r.note && <p className="small">{r.note}</p>}
-                <small className="muted">
-                  {t('Family: {f} · Regular team: {t}', { f: family.map((f) => tc(f.name)).join('، ') || t('none linked'), t: carers.map((c) => tc(c.name)).join('، ') || t('none yet') })}
-                </small>
-                <footer>
-                  <Link to={`/app/challenges?person=${r.id}&scope=all`} className="btn btn-light btn-sm">
-                    {tn('{n} open challenge', '{n} open challenges', open.length)}
-                  </Link>
-                  <Link to={`/app/report?person=${r.id}`} className="link small">
-                    {t('Report for {name}', { name: tc(r.name).split(' ')[0] })}
-                  </Link>
-                </footer>
-              </article>
-            );
-          })}
-        </div>
       ) : (
-        <Empty title="Nobody yet" text="The coordinator links people to your account." />
+        <PeopleTab recipients={recipients} onEdit={setEditingPerson} />
       )}
 
       {adding === 'user' && <AddUser onClose={() => setAdding(null)} />}
       {adding === 'person' && <AddPerson onClose={() => setAdding(null)} />}
       {editing && <EditUser userId={editing} onClose={() => setEditing(null)} />}
+      {editingPerson && <EditPerson recipientId={editingPerson} onClose={() => setEditingPerson(null)} />}
     </div>
   );
 }
@@ -236,8 +208,9 @@ function AddUser({ onClose }: { onClose: () => void }) {
 function AddPerson({ onClose }: { onClose: () => void }) {
   const { view, act } = useSession();
   const [f, setF] = useState({ name: '', age: 70, area: '', note: '', familyIds: [] as string[] });
+  const [care, setCare] = useState<ProfileDraft>(emptyDraft);
   const save = async () => {
-    const r = await act({ type: 'add_recipient', ...f });
+    const r = await act({ type: 'add_recipient', ...f, support: care.support, living: care.living, needs: care.needs });
     if (r.ok) onClose();
   };
   return (
@@ -269,6 +242,7 @@ function AddPerson({ onClose }: { onClose: () => void }) {
       <Field label="Care note">
         <textarea rows={3} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
       </Field>
+      <CareProfileFields value={care} onChange={setCare} note={f.note} age={f.age} idPrefix="add-care" />
       <fieldset className="checks">
         <legend>Family members</legend>
         {view.users
@@ -333,6 +307,177 @@ function EditUser({ userId, onClose }: { userId: string; onClose: () => void }) 
           </label>
         ))}
       </fieldset>
+    </Modal>
+  );
+}
+
+type GroupBy = 'support' | 'living' | 'need' | 'age';
+const GROUP_BY: { k: GroupBy; label: string }[] = [
+  { k: 'support', label: 'Support level' },
+  { k: 'need', label: 'Care need' },
+  { k: 'living', label: 'Living situation' },
+  { k: 'age', label: 'Age group' },
+];
+
+function groupsFor(by: GroupBy): { key: string; label: string; test: (p: CareProfile) => boolean }[] {
+  if (by === 'support') return SUPPORT_LEVELS.map((s) => ({ key: s, label: SUPPORT_LABEL[s], test: (p) => p.support === s }));
+  if (by === 'living') return LIVINGS.map((l) => ({ key: l, label: LIVING_LABEL[l], test: (p) => p.living === l }));
+  if (by === 'age') return [...AGE_GROUPS].reverse().map((a) => ({ key: a, label: AGE_LABEL[a], test: (p) => p.ageGroup === a }));
+  return [...CARE_NEEDS.map((n) => ({ key: n, label: NEED_LABEL[n], test: (p: CareProfile) => p.needs.includes(n) })), { key: 'none', label: 'No specific care needs', test: (p: CareProfile) => p.needs.length === 0 }];
+}
+
+function PeopleTab({ recipients, onEdit }: { recipients: Recipient[]; onEdit: (id: string) => void }) {
+  const { view, me } = useSession();
+  const [sp, setSp] = useSearchParams();
+  const by = (GROUP_BY.find((g) => g.k === sp.get('group'))?.k ?? 'support') as GroupBy;
+  const support = sp.get('support') ?? '';
+  const need = sp.get('need') ?? '';
+  const set = (k: string, v: string) => {
+    const next = new URLSearchParams(sp);
+    next.set('tab', 'people');
+    if (v) next.set(k, v);
+    else next.delete(k);
+    setSp(next, { replace: true });
+  };
+
+  if (!recipients.length) return <Empty title="Nobody yet" text="The coordinator links people to your account." />;
+
+  const rows = recipients.map((r) => ({ r, p: careProfile(r), open: view.challenges.filter((c) => c.recipientId === r.id && isActive(c)) }));
+  const shown = rows.filter((x) => (!support || x.p.support === support) && (!need || x.p.needs.includes(need as never) || (need === 'alone' && x.p.living === 'alone')));
+  const canEdit = (r: Recipient) => me.role === 'coordinator' || (me.role === 'family' && me.recipients.includes(r.id));
+  const groups = groupsFor(by)
+    .map((g) => ({ ...g, items: shown.filter((x) => g.test(x.p)) }))
+    .filter((g) => g.items.length);
+
+  return (
+    <>
+      <section className="care-summary" aria-label={t('People by support level')}>
+        {SUPPORT_LEVELS.map((s) => {
+          const inLevel = rows.filter((x) => x.p.support === s);
+          const open = inLevel.reduce((n, x) => n + x.open.length, 0);
+          return (
+            <button key={s} type="button" className={`care-tile care-${s} ${support === s ? 'on' : ''}`} aria-pressed={support === s} onClick={() => set('support', support === s ? '' : s)}>
+              <span className="care-tile-n">{inLevel.length}</span>
+              <span className="care-tile-label">{t(SUPPORT_LABEL[s])}</span>
+              <small>{t(SUPPORT_HINT[s])}</small>
+              <small className="care-tile-open">{tn('{n} open challenge', '{n} open challenges', open)}</small>
+            </button>
+          );
+        })}
+      </section>
+
+      <div className="row wrap gap-s care-toolbar">
+        <div className="seg" role="group" aria-label={t('Group people by')}>
+          {GROUP_BY.map((g) => (
+            <button key={g.k} type="button" className={by === g.k ? 'on' : ''} aria-pressed={by === g.k} onClick={() => set('group', g.k === 'support' ? '' : g.k)}>
+              {t(g.label)}
+            </button>
+          ))}
+        </div>
+        <div className="chip-select" role="group" aria-label={t('Filter by care need')}>
+          <button type="button" className={`chip ${!need ? 'chip-on' : ''}`} onClick={() => set('need', '')}>
+            {t('All needs')}
+          </button>
+          <button type="button" className={`chip ${need === 'alone' ? 'chip-on' : ''}`} onClick={() => set('need', need === 'alone' ? '' : 'alone')}>
+            <Icon name="user" size={13} /> {t('Lives alone')}
+          </button>
+          {CARE_NEEDS.filter((n) => rows.some((x) => x.p.needs.includes(n))).map((n) => (
+            <button key={n} type="button" className={`chip ${need === n ? 'chip-on' : ''}`} onClick={() => set('need', need === n ? '' : n)}>
+              <Icon name={NEED_ICON[n]} size={13} /> {t(NEED_LABEL[n])}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {groups.length ? (
+        groups.map((g) => (
+          <section key={g.key} className="care-group" aria-labelledby={`care-g-${g.key}`}>
+            <h2 id={`care-g-${g.key}`} className="care-group-head">
+              {t(g.label)} <span className="count">{g.items.length}</span>
+            </h2>
+            <div className="team-grid">
+              {g.items.map(({ r, open }) => {
+                const family = view.users.filter((u) => u.role === 'family' && u.recipients.includes(r.id));
+                const carers = view.users.filter((u) => u.role !== 'family' && u.recipients.includes(r.id));
+                return (
+                  <article key={r.id} className="person-card">
+                    <header>
+                      <span className="person-ava">{tc(r.name)[0]}</span>
+                      <span>
+                        <strong>{tc(r.name)}</strong>
+                        <small>{t('Age {age} · {area}', { age: r.age, area: tc(r.area) })}</small>
+                      </span>
+                    </header>
+                    <CareTags r={r} />
+                    {r.note && <p className="small">{tc(r.note)}</p>}
+                    <small className="muted">
+                      {t('Family: {f} · Regular team: {t}', { f: family.map((f) => tc(f.name)).join('، ') || t('none linked'), t: carers.map((c) => tc(c.name)).join('، ') || t('none yet') })}
+                    </small>
+                    <footer>
+                      <Link to={`/app/challenges?person=${r.id}&scope=all`} className="btn btn-light btn-sm">
+                        {tn('{n} open challenge', '{n} open challenges', open.length)}
+                      </Link>
+                      <Link to={`/app/report?person=${r.id}`} className="link small">
+                        {t('Report for {name}', { name: tc(r.name).split(' ')[0] })}
+                      </Link>
+                      {canEdit(r) && (
+                        <button type="button" className="link small" onClick={() => onEdit(r.id)}>
+                          {t('Edit care profile')}
+                        </button>
+                      )}
+                    </footer>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      ) : (
+        <Empty title="Nobody matches these filters" text="Clear a filter to see everyone again." action={<button type="button" className="btn btn-light btn-sm" onClick={() => setSp({ tab: 'people' })}>{t('Clear filters')}</button>} />
+      )}
+    </>
+  );
+}
+
+export function EditPerson({ recipientId, onClose }: { recipientId: string; onClose: () => void }) {
+  const { view, act } = useSession();
+  const r = view.recipients.find((x) => x.id === recipientId)!;
+  const [f, setF] = useState({ age: r.age, area: r.area, note: r.note });
+  const [care, setCare] = useState<ProfileDraft>(() => draftFrom(r));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const res = await act({ type: 'update_recipient', recipientId, ...f, support: care.support, living: care.living, needs: care.needs });
+    setBusy(false);
+    if (res.ok) onClose();
+  };
+  return (
+    <Modal
+      title={t('Care profile: {name}', { name: tc(r.name) })}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-dark" disabled={busy || !(f.age >= 1 && f.age <= 120)} onClick={save}>
+            Save changes
+          </button>
+        </>
+      }
+    >
+      <div className="grid-2">
+        <Field label="Age">
+          <input id="edit-care-age" type="number" min={1} max={120} value={f.age} onChange={(e) => setF({ ...f, age: Number(e.target.value) })} />
+        </Field>
+        <Field label="Area">
+          <input value={f.area} onChange={(e) => setF({ ...f, area: e.target.value })} />
+        </Field>
+      </div>
+      <Field label="Care note">
+        <textarea rows={2} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+      </Field>
+      <CareProfileFields value={care} onChange={setCare} note={f.note} age={f.age} idPrefix="edit-care" />
     </Modal>
   );
 }

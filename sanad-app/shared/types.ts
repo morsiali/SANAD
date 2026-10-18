@@ -1,3 +1,4 @@
+import type { CareNeed, Living, SupportLevel } from './care';
 // SANAD domain model — shared by the server, the browser and the tests.
 
 export type Role =
@@ -79,6 +80,10 @@ export interface Recipient {
   age: number;
   area: string;
   note: string;
+  /** Care category (see shared/care.ts). Optional so older saved data still loads; missing values are suggested from the note. */
+  support?: SupportLevel;
+  living?: Living;
+  needs?: CareNeed[];
 }
 
 export interface ChecklistItem {
@@ -247,7 +252,8 @@ export type Action =
   | { type: 'upsert_playbook'; playbook: Omit<Playbook, 'id' | 'uses' | 'successes' | 'authorId' | 'updatedAt'> & { id?: string } }
   | { type: 'delete_playbook'; id: string }
   | { type: 'update_settings'; settings: Settings }
-  | { type: 'add_recipient'; name: string; age: number; area: string; note: string; familyIds: string[] };
+  | { type: 'add_recipient'; name: string; age: number; area: string; note: string; familyIds: string[]; support?: SupportLevel; living?: Living; needs?: CareNeed[] }
+  | { type: 'update_recipient'; recipientId: string; age: number; area: string; note: string; support: SupportLevel; living: Living; needs: CareNeed[] };
 
 export class EngineError extends Error {
   status: number;

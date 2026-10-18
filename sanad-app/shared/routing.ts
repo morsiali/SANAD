@@ -1,6 +1,7 @@
 // The routing brain: classify a problem, infer urgency, pick the right person.
-import type { Category, Challenge, Msg, Priority, Role, RoutingDecision, Rule, Settings, User } from './types';
+import type { Category, Challenge, Msg, Priority, Recipient, Role, RoutingDecision, Rule, Settings, User } from './types';
 import { en, msg } from './messages';
+import { careProfile, isVulnerable } from './care';
 
 const STOP = new Set(
   'a an the and or but if of to in on at for with by from is are was were be been being it its this that these those i me my we our you your he she her his him they them their there here as so not no do does did have has had can could should would will just very really also about into over after before again then than too up down out off more most some any all each other such only own same both few once while what which who whom when where why how am please need needs help get got fix fixed solve handle handles best way doing من في علي الي عن مع هذا هذه ذلك تلك تي ذي كيف ماذا ما هل او و لا لم لن ان قد كان كانت يا انا نحن هو هي هم عندي لدي اريد يجب ممكن نحتاج احتاج'.split(
@@ -167,7 +168,7 @@ export interface RouteInput {
 
 export function decideRouting(
   input: RouteInput,
-  ctx: { users: User[]; rules: Rule[]; settings: Settings; loads: Record<string, number> },
+  ctx: { users: User[]; rules: Rule[]; settings: Settings; loads: Record<string, number>; recipients?: Recipient[] },
 ): RoutingDecision {
   const text = `${input.title}\n${input.description}`;
   const matches = matchRules(ctx.rules, input.title, input.description);
@@ -228,6 +229,16 @@ export function decideRouting(
   if (floored !== priority) {
     add(msg('r_floor', { priority: floored }));
     priority = floored;
+  }
+
+  // People who need high support, or who live alone, never wait at the lowest priority.
+  const person = ctx.recipients?.find((r) => r.id === input.recipientId);
+  if (person && priority === 'low') {
+    const reason = isVulnerable(careProfile(person));
+    if (reason) {
+      priority = 'medium';
+      add(msg(reason === 'high' ? 'r_care_high' : 'r_care_alone', { name: person.name }));
+    }
   }
 
   const pick = selectAssignee(ctx.users, ctx.loads, role, input.recipientId, text, ctx.settings);

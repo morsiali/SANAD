@@ -5,6 +5,7 @@ import { isActive, PRIORITY_WEIGHT } from '../../shared/routing';
 import { useSession } from '../lib/store';
 import { t, tc, tm, tn } from '../lib/i18n';
 import { recipientName } from '../lib/format';
+import { CARE_NEEDS, LIVINGS, LIVING_LABEL, NEED_LABEL, SUPPORT_LABEL, SUPPORT_LEVELS, inCareGroup } from '../../shared/care';
 import { useActions } from '../components/actions';
 import { Avatar, ChallengeRow, Empty, Icon, PriorityPill, SlaBadge } from '../components/ui';
 
@@ -30,6 +31,7 @@ export function Challenges() {
   const priority = sp.get('priority') ?? '';
   const category = sp.get('category') ?? '';
   const person = sp.get('person') ?? '';
+  const care = sp.get('care') ?? '';
   const flag = sp.get('flag') ?? '';
   const sort = sp.get('sort') ?? 'urgency';
   const q = sp.get('q') ?? '';
@@ -61,6 +63,7 @@ export function Challenges() {
       if (priority && c.priority !== priority) return false;
       if (category && c.category !== category) return false;
       if (person && c.recipientId !== person) return false;
+      if (care && !inCareGroup(view.recipients.find((r) => r.id === c.recipientId), care)) return false;
       if (flag === 'escalated' && !(c.escalated && isActive(c))) return false;
       if (flag === 'overdue' && !(isActive(c) && c.dueAt < Date.now())) return false;
       if (needle && !`${c.ref} ${c.title} ${c.description} ${recipientName(view, c.recipientId)}`.toLowerCase().includes(needle)) return false;
@@ -74,7 +77,7 @@ export function Challenges() {
     };
     out = [...out].sort(by[sort] ?? by.urgency);
     return out;
-  }, [view, me, scope, stage, priority, category, person, flag, sort, q, showClosed, layout]);
+  }, [view, me, scope, stage, priority, category, person, care, flag, sort, q, showClosed, layout]);
 
   const scopes = [
     ...(me.role === 'family' ? [] : [{ k: 'mine', label: 'Assigned to me' }]),
@@ -167,6 +170,30 @@ export function Challenges() {
                 {r.name}
               </option>
             ))}
+        </select>
+        <select value={care} onChange={(e) => set('care', e.target.value)} aria-label="Care group">
+          <option value="">Any care group</option>
+          <optgroup label={t('Support level')}>
+            {SUPPORT_LEVELS.map((s) => (
+              <option key={s} value={`support:${s}`}>
+                {t(SUPPORT_LABEL[s])}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label={t('Living situation')}>
+            {LIVINGS.map((l) => (
+              <option key={l} value={`living:${l}`}>
+                {t(LIVING_LABEL[l])}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label={t('Care needs')}>
+            {CARE_NEEDS.map((n) => (
+              <option key={n} value={`need:${n}`}>
+                {t(NEED_LABEL[n])}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <select value={flag} onChange={(e) => set('flag', e.target.value)} aria-label="Flag">
           <option value="">Any status</option>

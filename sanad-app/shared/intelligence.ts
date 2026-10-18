@@ -193,7 +193,7 @@ export function ask(view: View, raw: string, now = Date.now()): Answer {
     const subject = tail.length > 2 ? tail : q;
     const preview = decideRouting(
       { title: subject, description: '', recipientId: recipient?.id ?? view.recipients[0]?.id ?? '' },
-      { users: view.users, rules: view.rules, settings: view.settings, loads: view.loads },
+      { users: view.users, rules: view.rules, settings: view.settings, loads: view.loads, recipients: view.recipients },
     );
     const who: string | Msg = preview.assigneeId ? userName(view, preview.assigneeId) : msg('x_route_queue', { role: preview.role });
     return answer([msg('x_route', { role: preview.role, who, priority: preview.priority })], preview.assigneeId ? [{ kind: 'user', id: preview.assigneeId }] : [], ['q_how_fix', 'q_team'], {
@@ -270,7 +270,7 @@ export function ask(view: View, raw: string, now = Date.now()): Answer {
   const pbs = rankPlaybooks(view.playbooks, q).slice(0, 2);
   const preview = decideRouting(
     { title: q, description: '', recipientId: view.recipients[0]?.id ?? '' },
-    { users: view.users, rules: view.rules, settings: view.settings, loads: view.loads },
+    { users: view.users, rules: view.rules, settings: view.settings, loads: view.loads, recipients: view.recipients },
   );
   const cards: AnswerCard[] = [...hits.map((h) => ({ kind: 'challenge' as const, id: h.c.id })), ...pbs.map((p) => ({ kind: 'playbook' as const, id: p.playbook.id }))];
   return answer(

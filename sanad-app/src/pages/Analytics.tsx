@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { STAGES, STAGE_LABEL } from '../../shared/types';
 import { metrics } from '../../shared/analytics';
+import { isActive } from '../../shared/routing';
+import { LIVING_LABEL, SUPPORT_LABEL, SUPPORT_LEVELS, inCareGroup } from '../../shared/care';
 import { useSession } from '../lib/store';
 import { isAr, t } from '../lib/i18n';
 import { DailyChart, HBars } from '../components/charts';
@@ -14,6 +16,14 @@ export function Analytics() {
     [view, me],
   );
   const m = useMemo(() => metrics(scoped, now, days), [scoped, now, days]);
+  const byCare = useMemo(() => {
+    const groups = [...SUPPORT_LEVELS.map((s) => ({ key: `support:${s}`, label: SUPPORT_LABEL[s] })), { key: 'living:alone', label: LIVING_LABEL.alone }];
+    const people = view.recipients.filter((r) => scoped.some((c) => c.recipientId === r.id) || me.role === 'coordinator' || me.recipients.includes(r.id));
+    return groups.map((g) => {
+      const inGroup = scoped.filter((c) => inCareGroup(view.recipients.find((r) => r.id === c.recipientId), g.key));
+      return { ...g, count: inGroup.length, open: inGroup.filter((c) => isActive(c)).length, people: people.filter((r) => inCareGroup(r, g.key)).length };
+    });
+  }, [scoped, view.recipients, me]);
   const scopeLabel = me.role === 'coordinator' ? 'the whole care network' : me.role === 'family' ? 'your family' : 'you and your team';
 
   const kpis = [
@@ -69,6 +79,19 @@ export function Analytics() {
           <HBars label="Challenges by category" rows={m.byCategory.map((c) => ({ key: c.key, label: t(c.label), value: c.count }))} />
         </section>
       </div>
+
+      <section className="panel">
+        <header className="panel-head">
+          <h2>Challenges by care group</h2>
+          <Link to="/app/team?tab=people" className="link">
+            See people by group
+          </Link>
+        </header>
+        <HBars
+          label="Challenges by care group"
+          rows={byCare.map((g) => ({ key: g.key, label: t(g.label), value: g.count, note: t('{people} people · {open} open', { people: g.people, open: g.open }) }))}
+        />
+      </section>
 
       <section className="panel">
         <header className="panel-head">

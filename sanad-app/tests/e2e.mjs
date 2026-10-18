@@ -89,6 +89,7 @@ for (const email of roles) {
   await step(`${email.split('@')[0]}: all navigation links open real pages`, async () => {
     const p = await person(email);
     const links = await p.locator('.side-nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+  links.push('#/app/team?tab=people', '#/app/team?tab=people&group=need');
     if (links.length < 10) throw new Error(`only ${links.length} nav links`);
     for (const href of links) {
       await p.goto(`http://localhost:${PORT}/${href}`);
@@ -395,9 +396,15 @@ await step('a family member signs up with the person they care for and reports a
   await p.locator('#reg-rname').fill('Salem Saleh');
   await p.locator('#reg-rage').fill('81');
   await p.locator('#reg-rarea').fill('Jumeirah, Dubai');
+  await p.locator('#reg-rnote').fill('Dialysis on Mondays and Thursdays. Lives alone.');
+  await p.getByText('Suggested from the care note').waitFor();
+  if ((await p.locator('#reg-care-support-high').getAttribute('aria-checked')) !== 'true') throw new Error('high support should be suggested');
+  if ((await p.locator('#reg-care-living-alone').getAttribute('aria-checked')) !== 'true') throw new Error('lives alone should be suggested');
+  if (!(await p.locator('#reg-care-need-renal').isChecked())) throw new Error('dialysis need should be ticked');
   await p.getByRole('button', { name: 'Create account' }).click();
   await p.getByRole('heading', { level: 1 }).filter({ hasText: 'Reem' }).waitFor();
   await p.getByText('Salem Saleh').first().waitFor();
+  await p.locator('.person .care-level', { hasText: 'High support' }).waitFor();
   await go(p, '/app/report');
   await p.getByLabel('What’s the problem?').fill('Need a ride to the clinic on Monday');
   await p.locator('.route-preview').getByText('Yousef Karim').waitFor();
@@ -436,6 +443,59 @@ await step('coordinator accounts cannot be self-registered', async () => {
   const p = await person(null);
   await go(p, '/register');
   if (await p.getByRole('radio', { name: /Care coordinator/ }).isEnabled()) throw new Error('coordinator should be invite-only');
+  await p.context().close();
+});
+
+console.log('\nCare categories');
+await step('coordinator sees people grouped and filtered by care category', async () => {
+  const p = await person('sara@sanad.ae');
+  await go(p, '/app/team');
+  await p.getByRole('tab', { name: 'People we care for' }).click();
+  await p.locator('.care-tile').first().waitFor();
+  if ((await p.locator('.care-tile').count()) !== 3) throw new Error('expected 3 support tiles');
+  await p.locator('.care-group-head', { hasText: 'High support' }).waitFor();
+  await p.locator('.care-tile', { hasText: 'High support' }).click();
+  await p.locator('.person-card', { hasText: 'Hamad Al Mansoori' }).waitFor();
+  if (await p.locator('.person-card', { hasText: 'Fatima Al Noor' }).count()) throw new Error('filter should hide Fatima');
+  await p.locator('.care-tile', { hasText: 'High support' }).click();
+  await p.locator('.care-toolbar .seg').getByRole('button', { name: 'Care need' }).click();
+  await p.locator('.care-group-head', { hasText: 'Kidney care & dialysis' }).waitFor();
+  await p.locator('.care-toolbar .chip-select').getByRole('button', { name: 'Lives alone' }).click();
+  await p.locator('.person-card', { hasText: 'Khadija Saeed' }).first().waitFor();
+  if (await p.locator('.person-card', { hasText: 'Hamad Al Mansoori' }).count()) throw new Error('lives-alone filter should hide Hamad');
+  await p.locator('.care-toolbar .chip-select').getByRole('button', { name: 'All needs' }).click();
+  await go(p, '/app/analytics');
+  await p.getByRole('heading', { name: 'Challenges by care group' }).waitFor();
+  await p.context().close();
+});
+await step('family edits a care profile; challenges filter by care group', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/team?tab=people');
+  await p.locator('.person-card', { hasText: 'Fatima Al Noor' }).getByRole('button', { name: 'Edit care profile' }).click();
+  await p.locator('.modal #edit-care-support-high').click();
+  await p.locator('.modal #edit-care-need-memory').check();
+  await modalBtn(p, 'Save changes').click();
+  await text(p, 'Care profile for Fatima Al Noor saved');
+  const card = p.locator('.person-card', { hasText: 'Fatima Al Noor' });
+  await card.locator('.care-level', { hasText: 'High support' }).waitFor();
+  await card.getByText('Memory & cognition').waitFor();
+  await go(p, '/app/challenges?care=support:independent');
+  await p.getByRole('heading', { level: 1 }).first().waitFor();
+  await p.waitForTimeout(400);
+  if (await p.locator('.challenge-row, .crow, a[href*="/app/challenges/c"]').count()) throw new Error('no independent people, list should be empty');
+  await go(p, '/app/challenges?care=support:high');
+  await p.locator('a[href*="/app/challenges/c"]').first().waitFor();
+  await p.context().close();
+  const sara = await person('sara@sanad.ae');
+  await go(sara, '/app/inbox');
+  await sara.getByText('Mariam Al Noor updated the care profile for Fatima Al Noor').waitFor();
+  await sara.context().close();
+});
+await step('carers cannot edit care profiles', async () => {
+  const p = await person('aisha@sanad.ae');
+  await go(p, '/app/team?tab=people');
+  await p.locator('.person-card').first().waitFor();
+  if (await p.getByRole('button', { name: 'Edit care profile' }).count()) throw new Error('carer should not see edit');
   await p.context().close();
 });
 
@@ -486,7 +546,8 @@ const englishLeft = async (page) =>
       if (!el || el.closest('script,style,svg,[data-raw],code,input,textarea')) continue;
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) continue;
-      const typed = /^(Hessa|Ali|Reem|Salem|Saleh)$/; // names entered by people who signed up during this run
+      const typed = /^(Hessa|Ali|Reem|Salem|Saleh|Jumeirah|Dubai)$/; // names and places typed by people who signed up during this run
+      if (n.nodeValue.trim() === 'Dialysis on Mondays and Thursdays. Lives alone.') continue; // a care note typed during this run
       const words = n.nodeValue.split(/[\s·,()“”«»:]+/).filter((x) => /[A-Za-z]{3,}/.test(x) && !typed.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN)$/.test(x));
       if (words.length) out.push(n.nodeValue.trim());
     }
@@ -530,6 +591,7 @@ await step('every page reads fully in Arabic (coordinator)', async () => {
   await p.click('form button[type=submit]');
   await p.getByRole('heading', { level: 1 }).first().waitFor();
   const links = await p.locator('.side-nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+  links.push('#/app/team?tab=people', '#/app/team?tab=people&group=need');
   const leftovers = [];
   for (const href of links) {
     await p.goto(`http://localhost:${PORT}/${href}`);

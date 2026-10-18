@@ -33,7 +33,7 @@ export function Report() {
     if (debounced.title.trim().length < 4 || !recipientId) return null;
     return decideRouting(
       { ...debounced, recipientId, priority, category },
-      { users: view.users, rules: view.rules, settings: view.settings, loads: Object.keys(view.loads).length ? view.loads : computeLoads(view.users, view.challenges) },
+      { users: view.users, rules: view.rules, settings: view.settings, loads: Object.keys(view.loads).length ? view.loads : computeLoads(view.users, view.challenges), recipients: view.recipients },
     );
   }, [debounced, recipientId, priority, category, view]);
 
