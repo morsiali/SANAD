@@ -1,4 +1,5 @@
 import { HashRouter, Link, Route, Routes } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ForecastPage } from './pages/Forecast';
 import { AppProvider } from './lib/store';
 import { Shell } from './components/Shell';
@@ -36,6 +37,7 @@ export default function App() {
   return (
     <AppProvider>
       <HashRouter>
+        <ErrorBoundary>
         <Routes>
           <Route path="/" element={<SignIn />} />
           <Route path="/signin" element={<SignIn />} />
@@ -65,6 +67,7 @@ export default function App() {
           </Route>
           <Route path="*" element={<SignIn />} />
         </Routes>
+        </ErrorBoundary>
         <Toasts />
       </HashRouter>
     </AppProvider>

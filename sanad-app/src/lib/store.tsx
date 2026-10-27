@@ -27,6 +27,8 @@ interface Ctx {
   refresh(): Promise<void>;
   toast(text: string, tone?: Toast['tone'], m?: Msg): void;
   replaceView(v: View): void;
+  /** Continue this session with a new token (after a password change). */
+  adoptToken(token: string): void;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -157,7 +159,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const me = useMemo(() => view?.users.find((u) => u.id === view.me) ?? null, [view]);
 
-  const value: Ctx = { backend, token, view, me, ready: ready && !!backend, now, toasts, signIn, signUp, signOut, act, refresh, toast, replaceView: setView };
+  const adoptToken = useCallback((t: string) => {
+    writeSession(t);
+    setToken(t);
+  }, []);
+
+  const value: Ctx = { backend, token, view, me, ready: ready && !!backend, now, toasts, signIn, signUp, signOut, act, refresh, toast, replaceView: setView, adoptToken };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
 

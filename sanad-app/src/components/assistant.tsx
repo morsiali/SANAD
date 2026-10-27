@@ -18,6 +18,7 @@ import { userName } from '../../shared/engine';
 import { useSession } from '../lib/store';
 import { getLang, t, tc, tm } from '../lib/i18n';
 import { dateTime } from '../lib/format';
+import { prefersLessMotion } from '../lib/display';
 import { Avatar, ChallengeRow, Field, Icon, PriorityPill, RoleTag, Sparkle } from './ui';
 import { fromLocal, toLocal } from './tasks';
 
@@ -166,7 +167,7 @@ export function Conversation({ conv, context, compact }: { conv: ReturnType<type
   const suggestions = useMemo(() => pageSuggestions(view, context, now), [view, context, now]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' });
+    endRef.current?.scrollIntoView?.({ behavior: prefersLessMotion() ? 'auto' : 'smooth', block: 'end' });
   }, [conv.turns]);
 
   const onSubmit = (e: FormEvent) => {

@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-demo
+dist-workflow
+data
+backups
+.env
+*.tmp
+tests

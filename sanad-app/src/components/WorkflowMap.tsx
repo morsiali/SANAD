@@ -181,7 +181,7 @@ export function WorkflowMap({ counts, initialRole = 'all', settings, linkable = 
 
       <figure className="wf-figure">
         <div className="wf-scroll">
-          <svg viewBox={`0 0 ${W} ${H}`} className="wf-svg" role="img" aria-label={t('SANAD workflow: a problem is reported, routed automatically to the best available person, worked, resolved and confirmed by the family; unmatched problems go to the coordinator, missed response times escalate, and unfixed problems reopen.')}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="wf-svg" role="group" aria-label={t('SANAD workflow: a problem is reported, routed automatically to the best available person, worked, resolved and confirmed by the family; unmatched problems go to the coordinator, missed response times escalate, and unfixed problems reopen.')}>
             <defs>
               <marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />

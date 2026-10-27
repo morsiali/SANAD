@@ -76,10 +76,13 @@ export function SignIn() {
             Create an account
           </Link>
         </p>
-        <p className="small muted">
-          Demo password for every account: <code>sanad123</code>
-        </p>
+        {backend?.demo !== false && (
+          <p className="small muted">
+            Demo password for every account: <code>sanad123</code>
+          </p>
+        )}
       </div>
+      {backend?.demo !== false && (
       <div className="signin-demo">
         <h2 className="display-m">
           <Sparkle size={22} /> Try any seat in the care circle
@@ -109,6 +112,7 @@ export function SignIn() {
           {!accounts.length && <p className="muted">Loading accounts…</p>}
         </div>
       </div>
+      )}
     </div>
   );
 }

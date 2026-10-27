@@ -30,7 +30,13 @@ Sign in as two people in two tabs to watch a problem move between them live.
 For development with hot reload: `npm run dev` (app on http://localhost:5173, API on :4000).
 
 Data is saved to `data/sanad.json` (change with `SANAD_DATA=...`). Port: `PORT=...`.
-The coordinator can reset the demo from Settings.
+The coordinator can reset the demo from Settings. Back up data and uploaded files with `npm run backup`.
+
+### Real use (not the demo)
+
+Run in production mode with a new data file and a first coordinator — see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**
+for every setting, the Docker image and the go-live checklist. The summary of all five phases is in
+**[docs/FINAL-REPORT.md](docs/FINAL-REPORT.md)**.
 
 ### No server? Single-file demo
 
@@ -49,7 +55,7 @@ Reported → Routed (rule match → availability → best person, or coordinator
 
 ## Profiles, consent and permissions
 
-See **[docs/PHASE-1.md](docs/PHASE-1.md)** **[docs/PHASE-2.md](docs/PHASE-2.md)** (care plans, tasks, appointments, documents, progress charts and the Today view) **[docs/PHASE-3.md](docs/PHASE-3.md)** (the assistant: cited answers, briefs, handovers, draft plans, clinical safety) and **[docs/PHASE-4.md](docs/PHASE-4.md)** (monitoring, standing permissions, suggested timing changes, notification settings, Coming up) for the audit, the delivery plan, the roles and permissions
+See **[docs/PHASE-1.md](docs/PHASE-1.md)** **[docs/PHASE-2.md](docs/PHASE-2.md)** (care plans, tasks, appointments, documents, progress charts and the Today view) **[docs/PHASE-3.md](docs/PHASE-3.md)** (the assistant: cited answers, briefs, handovers, draft plans, clinical safety), **[docs/PHASE-4.md](docs/PHASE-4.md)** (monitoring, standing permissions, suggested timing changes, notification settings, Coming up) and **[docs/PHASE-5.md](docs/PHASE-5.md)** (security, accessibility, monitoring and deployment) for the audit, the delivery plan, the roles and permissions
 matrix, the consent and approval rules, test results and known limitations. Copy `.env.example` for the
 server settings.
 
@@ -69,9 +75,9 @@ Settings → Pages → Build and deployment → Source: **GitHub Actions**.
 ## Tests
 
 ```bash
-npm test           # 169 unit + API tests (routing, permissions, consent, approvals, records, medicines, tasks, appointments, documents, assistant, monitoring, Arabic)
+npm test           # 184 unit + API tests (routing, permissions, consent, approvals, records, medicines, tasks, appointments, documents, assistant, monitoring, security, Arabic)
 npm run typecheck
-npm run build && npm run e2e   # 89 end-to-end checks in Chromium, several users at once, English and Arabic
+npm run build && npm run e2e   # 95 end-to-end checks in Chromium: several users at once, English, Arabic, phone, automated accessibility (WCAG 2.1 AA) checks
 ```
 `npm run e2e` uses Playwright. The first time, run `npx playwright install chromium`.
 

@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { createRequire } from 'node:module';
 
 const PORT = 4123;
 const BASE = `http://localhost:${PORT}/#`;
@@ -219,7 +220,9 @@ await step('list filters, search and sort', async () => {
   await btn(sara, 'Clear filters').click();
   await sara.getByLabel('Priority').selectOption('urgent');
   await sara.getByLabel('Sort').selectOption('newest');
-  await sara.getByLabel('Include solved').check();
+  await sara.getByLabel('Include solved').click();
+  await sara.waitForURL(/closed=1/);
+  if (!(await sara.getByLabel('Include solved').isChecked())) throw new Error('filter not applied');
   await sara.getByLabel('Priority').selectOption('');
 });
 await step('routing rules: test, create, edit, toggle and delete a rule', async () => {
@@ -456,13 +459,17 @@ await step('coordinator sees people grouped and filtered by care category', asyn
   await p.locator('.care-group-head', { hasText: 'High support' }).waitFor();
   await p.locator('.care-tile', { hasText: 'High support' }).click();
   await p.locator('.person-card', { hasText: 'Hamad Al Mansoori' }).waitFor();
-  if (await p.locator('.person-card', { hasText: 'Fatima Al Noor' }).count()) throw new Error('filter should hide Fatima');
+  await p.locator('.person-card', { hasText: 'Fatima Al Noor' }).first().waitFor({ state: 'detached', timeout: 5000 }).catch(() => {
+    throw new Error('filter should hide Fatima');
+  });
   await p.locator('.care-tile', { hasText: 'High support' }).click();
   await p.locator('.care-toolbar .seg').getByRole('button', { name: 'Care need' }).click();
   await p.locator('.care-group-head', { hasText: 'Kidney care & dialysis' }).waitFor();
   await p.locator('.care-toolbar .chip-select').getByRole('button', { name: 'Lives alone' }).click();
   await p.locator('.person-card', { hasText: 'Khadija Saeed' }).first().waitFor();
-  if (await p.locator('.person-card', { hasText: 'Hamad Al Mansoori' }).count()) throw new Error('lives-alone filter should hide Hamad');
+  await p.locator('.person-card', { hasText: 'Hamad Al Mansoori' }).first().waitFor({ state: 'detached', timeout: 5000 }).catch(() => {
+    throw new Error('lives-alone filter should hide Hamad');
+  });
   await p.locator('.care-toolbar .chip-select').getByRole('button', { name: 'All needs' }).click();
   await go(p, '/app/analytics');
   await p.getByRole('heading', { name: 'Challenges by care group' }).waitFor();
@@ -961,6 +968,90 @@ await step('“Coming up” lists refills with the rule, and a coordinator sees 
   await c.context().close();
 });
 
+console.log('\nSecurity, accessibility and operations');
+const AXE = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
+async function axeAudit(email, paths, lang = 'en', viewport = { width: 1360, height: 900 }) {
+  // The audit script is injected by the test, so this context bypasses the page's content security policy.
+  const ctx = await browser.newContext({ viewport, bypassCSP: true });
+  if (lang === 'ar') await ctx.addInitScript(() => localStorage.setItem('sanad.lang', 'ar'));
+  const p = await ctx.newPage();
+  if (email) {
+    await go(p, '/signin');
+    await p.fill('input[type=email]', email);
+    await p.fill('input[type=password]', 'sanad123');
+    await p.click('form button[type=submit]');
+    await p.waitForURL(/#\/app/);
+    await p.locator('.side-nav').waitFor();
+  }
+  const out = [];
+  for (const path of paths) {
+    await go(p, path);
+    await p.waitForTimeout(500);
+    await p.addScriptTag({ path: AXE });
+    const v = await p.evaluate(async () => (await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })).violations.filter((x) => x.impact === 'serious' || x.impact === 'critical').map((x) => `${x.id} (${x.nodes.length}): ${x.nodes[0].target.join(' ')}`));
+    for (const x of v) out.push(`${lang} ${email ?? 'visitor'} ${path}: ${x}`);
+  }
+  await ctx.close();
+  return out;
+}
+await step('no serious accessibility problems (WCAG 2.1 AA automated checks) for visitors, family, staff, admin, Arabic and phone', async () => {
+  const issues = [
+    ...(await axeAudit(null, ['/home', '/signin', '/register', '/workflow'])),
+    ...(await axeAudit('mariam@sanad.ae', ['/app', '/app/today', '/app/people', '/app/people/r-fatima', '/app/people/r-fatima?tab=medical', '/app/people/r-fatima?tab=plans', '/app/people/r-fatima?tab=appointments', '/app/people/r-fatima?tab=progress', '/app/people/r-fatima?tab=team', '/app/calendar', '/app/forecast', '/app/challenges', '/app/report', '/app/approvals', '/app/intelligence', '/app/inbox', '/app/settings'])),
+    ...(await axeAudit('sara@sanad.ae', ['/app', '/app/challenges', '/app/team', '/app/routing', '/app/analytics', '/app/settings'])),
+    ...(await axeAudit('majid@sanad.ae', ['/app', '/app/team'])),
+    ...(await axeAudit('mariam@sanad.ae', ['/app/today', '/app/people/r-fatima?tab=team', '/app/forecast', '/app/settings', `/app/intelligence?q=${encodeURIComponent('What changed for Fatima this week?')}`], 'ar')),
+    ...(await axeAudit('khadija@sanad.ae', ['/app', '/app/people/r-khadija?tab=progress'], 'en', { width: 390, height: 844 })),
+  ];
+  if (issues.length) throw new Error(issues.slice(0, 6).join(' | '));
+});
+await step('keyboard: the first Tab reaches “Skip to content”, which moves focus to the page', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/today');
+  await p.keyboard.press('Tab');
+  if ((await p.evaluate(() => document.activeElement?.textContent?.trim())) !== 'Skip to content') throw new Error('skip link is not first');
+  await p.keyboard.press('Enter');
+  await p.waitForFunction(() => document.activeElement?.id === 'main');
+  if (!(await p.evaluate(() => location.hash.includes('/app/today')))) throw new Error('skip link changed the page');
+  await p.context().close();
+});
+await step('display settings: larger text and reduced motion apply at once and survive a reload', async () => {
+  const p = await person('khadija@sanad.ae');
+  await go(p, '/app/settings');
+  await p.getByRole('radio', { name: 'Larger' }).click();
+  await p.getByLabel('Reduce motion (no animations or smooth scrolling)').check();
+  await p.reload();
+  await p.getByRole('heading', { name: 'Display' }).waitFor();
+  const d = await p.evaluate(() => ({ ...document.documentElement.dataset }));
+  if (d.text !== 'larger' || d.motion !== 'reduce') throw new Error(JSON.stringify(d));
+  await p.context().close();
+});
+await step('the server sends security headers and the app works under its content security policy', async () => {
+  const p = await person(null);
+  const res = await p.request.get(`http://localhost:${PORT}/`);
+  const h = res.headers();
+  for (const k of ['content-security-policy', 'x-content-type-options', 'x-frame-options', 'referrer-policy']) if (!h[k]) throw new Error(`missing ${k}`);
+  await p.context().close();
+});
+await step('“sign out on all devices” ends the session in another window', async () => {
+  const a = await person('joseph@sanad.ae');
+  const b = await person('joseph@sanad.ae');
+  await go(a, '/app/settings');
+  await btn(a, 'Sign out on all devices').click();
+  await a.waitForURL(/signin/);
+  await b.reload();
+  await b.waitForURL(/signin/, { timeout: 15000 });
+  await a.context().close();
+  await b.context().close();
+});
+await step('coordinators see system status with counts only', async () => {
+  const p = await person('sara@sanad.ae');
+  await go(p, '/app/settings');
+  await p.getByRole('heading', { name: 'System status' }).waitFor();
+  await p.getByText('Background checks run').waitFor();
+  await p.context().close();
+});
+
 console.log('\nArabic');
 const englishLeft = async (page) =>
   page.evaluate(() => {
@@ -1042,7 +1133,8 @@ await step('profile sections read fully in Arabic (guardian and psychologist)', 
     ['huda@sanad.ae', ['/app/today', '/app/calendar', '/app/people/r-rashid?tab=plans', '/app/people/r-rashid?tab=appointments', '/app/people/r-rashid?tab=documents', '/app/people/r-rashid?tab=progress', '/app/people', '/app/people/r-rashid', '/app/people/r-rashid?tab=medical', '/app/people/r-rashid?tab=wellbeing', '/app/people/r-rashid?tab=academic', '/app/people/r-rashid?tab=social', '/app/people/r-rashid?tab=activity', '/app/people/r-rashid?tab=rehab', '/app/people/r-rashid?tab=team', '/app/people/r-rashid?tab=history', '/app/approvals']],
     ['salma@sanad.ae', ['/app/people/r-rashid?tab=wellbeing']],
     ['mariam@sanad.ae', ['/app/people/r-fatima?tab=medical', '/app/approvals', '/app/today', '/app/people/r-fatima?tab=progress', '/app/people/r-fatima?tab=plans', '/app/people/r-fatima?tab=appointments', '/app/people/r-fatima?tab=team', '/app/forecast', '/app/settings', '/app/inbox']],
-    ['khadija@sanad.ae', ['/app/today', '/app/people/r-khadija?tab=plans']],
+    ['khadija@sanad.ae', ['/app/today', '/app/people/r-khadija?tab=plans', '/app/settings']],
+    ['sara@sanad.ae', ['/app/settings']],
   ]) {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
     await ctx.addInitScript(() => localStorage.setItem('sanad.lang', 'ar'));

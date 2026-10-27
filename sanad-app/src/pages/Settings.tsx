@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import type { SystemStatus } from '../lib/backend';
 import { useNavigate } from 'react-router-dom';
 import { ROLE_LABEL, isHousehold } from '../../shared/types';
 import { useSession } from '../lib/store';
@@ -6,9 +7,11 @@ import { downloadJson } from '../lib/format';
 import { useLanguage } from '../lib/lang';
 import { Avatar, Field, Icon, Modal } from '../components/ui';
 import { NotifySettings } from '../components/monitoring';
+import { readDisplay, saveDisplay, type Display } from '../lib/display';
+import { t } from '../lib/i18n';
 
 export function SettingsPage() {
-  const { me, act, backend, token, toast, replaceView, signOut } = useSession();
+  const { me, act, backend, token, toast, replaceView, signOut, adoptToken } = useSession();
   const nav = useNavigate();
   const { lang, setLang } = useLanguage();
   const [name, setName] = useState(me.name);
@@ -25,7 +28,9 @@ export function SettingsPage() {
     e.preventDefault();
     if (pw.next !== pw.confirm) return toast('The new passwords do not match', 'error');
     try {
-      toast(await backend.changePassword(token, pw.current, pw.next));
+      const r = await backend.changePassword(token, pw.current, pw.next);
+      if (r.token) adoptToken(r.token);
+      toast(r.message);
       setPw({ current: '', next: '', confirm: '' });
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -156,7 +161,7 @@ export function SettingsPage() {
               <button type="button" className="btn btn-light" onClick={doExport}>
                 <Icon name="download" size={16} /> {__SANAD_MODE__ === 'demo' ? 'Copy my data' : 'Export my data'}
               </button>
-              {me.role === 'coordinator' && (
+              {me.role === 'coordinator' && backend.demo && (
                 <button type="button" className="btn btn-light danger" onClick={() => setConfirmReset(true)}>
                   <Icon name="refresh" size={16} /> Reset demo data
                 </button>
@@ -171,15 +176,31 @@ export function SettingsPage() {
               >
                 <Icon name="logout" size={16} /> Sign out
               </button>
+              {backend.mode === 'server' && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={async () => {
+                    try {
+                      toast(await backend.logoutAll(token));
+                    } finally {
+                      signOut();
+                      nav('/signin');
+                    }
+                  }}
+                >
+                  <Icon name="shield" size={16} /> Sign out on all devices
+                </button>
+              )}
             </div>
           </section>
         </div>
       </div>
-      {me.role !== 'admin' && (
-        <div className="cols cols-even settings-more">
-          <NotifySettings />
-        </div>
-      )}
+      <div className="cols cols-even settings-more">
+        {me.role !== 'admin' && <NotifySettings />}
+        <DisplaySettings />
+      </div>
+      {(me.role === 'coordinator' || me.role === 'admin') && <SystemStatusPanel />}
       {confirmReset && (
         <Modal
           title="Reset the demo workspace?"
@@ -199,5 +220,92 @@ export function SettingsPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Text size and motion for this device. */
+function DisplaySettings() {
+  const [d, setD] = useState<Display>(readDisplay);
+  const set = (next: Display) => {
+    setD(next);
+    saveDisplay(next);
+  };
+  return (
+    <section className="panel form" aria-labelledby="display-h">
+      <header className="panel-head">
+        <h2 id="display-h">{t('Display')}</h2>
+      </header>
+      <fieldset className="plain">
+        <legend className="field-label">{t('Text size')}</legend>
+        <div className="seg" role="radiogroup" aria-label={t('Text size')}>
+          {(
+            [
+              ['normal', 'Standard'],
+              ['large', 'Large'],
+              ['larger', 'Larger'],
+            ] as const
+          ).map(([v, label]) => (
+            <button key={v} type="button" role="radio" aria-checked={d.text === v} className={d.text === v ? 'on' : ''} onClick={() => set({ ...d, text: v })}>
+              {t(label)}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <label className="check">
+        <input type="checkbox" checked={d.motion === 'reduce'} onChange={(e) => set({ ...d, motion: e.target.checked ? 'reduce' : 'system' })} />
+        <span>{t('Reduce motion (no animations or smooth scrolling)')}</span>
+      </label>
+      <p className="small muted">{t('Saved on this device only. SANAD also follows your device’s own “reduce motion” setting.')}</p>
+    </section>
+  );
+}
+
+/** Health of the SANAD server for coordinators and admins: counts and timings only. */
+function SystemStatusPanel() {
+  const { backend, token } = useSession();
+  const [s, setS] = useState<SystemStatus | null | 'error'>(null);
+  useEffect(() => {
+    backend.systemStatus(token).then(setS, () => setS('error'));
+  }, [backend, token]);
+  if (backend.mode !== 'server') {
+    return (
+      <section className="panel settings-more">
+        <h2>{t('System status')}</h2>
+        <p className="muted small">{t('This is the browser demo: everything runs in this browser, so there is no server to monitor.')}</p>
+      </section>
+    );
+  }
+  if (!s) return null;
+  if (s === 'error') return <p className="form-error">{t('System status could not be loaded.')}</p>;
+  const rows: [string, string | number][] = [
+    ['Running for', `${Math.floor(s.uptimeSeconds / 3600)} h ${Math.floor((s.uptimeSeconds % 3600) / 60)} min`],
+    ['Mode', t(s.demo ? 'Demo' : 'Production')],
+    ['Data storage', t(s.storage === 'file' ? 'File on the server' : 'Memory only')],
+    ['AI model for the assistant', t(s.model ? 'Connected' : 'Not connected')],
+    ['Requests', s.requests],
+    ['Server errors', s.errors5xx],
+    ['Refused or invalid requests', s.errors4xx],
+    ['Failed sign-ins / paused', `${s.loginFailures} / ${s.lockouts}`],
+    ['Errors reported by browsers', s.clientErrors],
+    ['Background checks run', `${s.sweep.runs} (${t('last took {ms} ms', { ms: s.sweep.lastMs })}${s.sweep.failures ? `, ${t('{n} failed', { n: s.sweep.failures })}` : ''})`],
+    ['Open monitoring alerts', s.records.alertsOpen],
+  ];
+  return (
+    <section className="panel settings-more" aria-labelledby="status-h">
+      <header className="panel-head">
+        <h2 id="status-h">{t('System status')}</h2>
+      </header>
+      <table className="data-table">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <th scope="row">{t(k)}</th>
+              <td>{v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="small muted">{t('Counts since the server started. No personal information is collected here.')}</p>
+    </section>
   );
 }

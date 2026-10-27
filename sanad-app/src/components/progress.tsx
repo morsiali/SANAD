@@ -74,7 +74,7 @@ function LineChart({ s, from: rangeFrom, to }: { s: Series; from: number; to: nu
   const hp = hover !== null ? s.points[hover] : null;
   return (
     <div className="chart-box">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t('{label} over time, {n} recorded values', { label: s.label, n: s.points.length })} className="progress-svg">
+      <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={t('{label} over time, {n} recorded values', { label: s.label, n: s.points.length })} className="progress-svg">
         {ticks.map((v) => (
           <g key={v}>
             <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} className="grid" />
@@ -269,7 +269,7 @@ function TaskWeeks({ recipientId, from, to }: { recipientId: string; from: numbe
         </table>
       ) : (
         <div className="chart-box">
-          <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t('Tasks due and completed per week')} className="progress-svg">
+          <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={t('Tasks due and completed per week')} className="progress-svg">
             {[0, max].map((v) => (
               <g key={v}>
                 <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} className="grid" />

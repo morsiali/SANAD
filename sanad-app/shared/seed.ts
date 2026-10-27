@@ -443,3 +443,58 @@ export function createSeed(now = Date.now()): State {
   sweep(state, now);
   return state;
 }
+
+/**
+ * A real (non-demo) workspace: no demo people or accounts, just the routing rules and playbooks,
+ * one organisation and its first care coordinator. Everyone else joins by signing up or by invitation.
+ */
+export function createEmpty(now: number, org: { name: string }, admin: { name: string; email: string }): State {
+  const orgId = 'org-main';
+  const coordinator: User = {
+    id: 'u-coordinator',
+    name: admin.name,
+    role: 'coordinator',
+    title: 'Care coordinator',
+    org: org.name,
+    email: admin.email.trim().toLowerCase(),
+    initials: admin.name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]!.toUpperCase())
+      .join(''),
+    color: '#202128',
+    available: true,
+    skills: [],
+    recipients: [],
+    orgId,
+  };
+  return {
+    version: 1,
+    schema: 4,
+    seq: 100,
+    users: [coordinator],
+    recipients: [],
+    challenges: [],
+    rules: JSON.parse(JSON.stringify(rules)),
+    playbooks: playbookDefs.map((p) => ({ ...p, steps: [...p.steps], tags: [...p.tags], uses: 0, successes: 0, authorId: coordinator.id, updatedAt: now })),
+    notifications: [],
+    settings: { sla: { urgent: 60, high: 240, medium: 1440, low: 4320 }, autoEscalate: true, balanceLoad: true, preferContinuity: true },
+    orgs: [{ id: orgId, name: org.name }],
+    memberships: [],
+    invites: [],
+    consents: [],
+    approvals: [],
+    audit: [],
+    records: [],
+    medications: [],
+    doseLogs: [],
+    plans: [],
+    tasks: [],
+    appointments: [],
+    documents: [],
+    alerts: [],
+    standing: [],
+    proposals: [],
+  };
+}

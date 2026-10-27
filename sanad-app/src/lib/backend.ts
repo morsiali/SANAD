@@ -52,13 +52,20 @@ export interface ActResult {
 
 export interface Backend {
   mode: 'server' | 'browser';
+  /** Demo world with sample accounts (always true in the browser demo). */
+  demo: boolean;
   accounts(): Promise<Account[]>;
   login(email: string, password: string): Promise<{ token: string; userId: string }>;
   register(input: RegisterInput & { password: string }): Promise<{ token: string; userId: string }>;
   load(token: string): Promise<View>;
   act(token: string, action: Action): Promise<ActResult>;
   subscribe(token: string, onChange: () => void): () => void;
-  changePassword(token: string, current: string, next: string): Promise<string>;
+  /** Returns a new token when the server signed out other sessions. */
+  changePassword(token: string, current: string, next: string): Promise<{ message: string; token?: string }>;
+  /** Signs this person out on every device (server mode). */
+  logoutAll(token: string): Promise<string>;
+  /** Counts and timings for coordinators and admins (server mode); null in the browser demo. */
+  systemStatus(token: string): Promise<SystemStatus | null>;
   reset(token: string): Promise<ActResult>;
   exportData(token: string): Promise<unknown>;
   inviteInfo(code: string): Promise<InviteInfo | null>;
@@ -68,6 +75,22 @@ export interface Backend {
   /** Asks the assistant. Read-only: it never changes anything. */
   assistant(token: string, req: AssistRequest, lang: 'en' | 'ar'): Promise<AssistantAnswer>;
   assistantStatus(token: string): Promise<{ model: boolean; name: string | null }>;
+}
+
+export interface SystemStatus {
+  uptimeSeconds: number;
+  demo: boolean;
+  storage: string;
+  model: boolean;
+  requests: number;
+  errors4xx: number;
+  errors5xx: number;
+  loginFailures: number;
+  lockouts: number;
+  clientErrors: number;
+  sweep: { runs: number; lastAt: number | null; lastMs: number; maxMs: number; failures: number };
+  records: { users: number; people: number; tasks: number; alertsOpen: number };
+  routes: { route: string; requests: number; avgMs: number; maxMs: number }[];
 }
 
 export interface UploadInput {
@@ -91,7 +114,7 @@ export class ApiError extends Error {
 }
 
 // ---------------------------------------------------------------- server ----
-function serverBackend(): Backend {
+function serverBackend(demo = true): Backend {
   const call = async <T,>(path: string, init: RequestInit & { token?: string } = {}): Promise<T> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (init.token) headers.Authorization = `Bearer ${init.token}`;
@@ -107,12 +130,15 @@ function serverBackend(): Backend {
   };
   return {
     mode: 'server',
+    demo,
     accounts: () => call('/api/accounts'),
     login: (email, password) => call('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
     register: (input) => call('/api/register', { method: 'POST', body: JSON.stringify(input) }),
     load: (token) => call('/api/state', { token }),
     act: (token, action) => call('/api/action', { method: 'POST', token, body: JSON.stringify({ action }) }),
-    changePassword: async (token, current, next) => (await call<{ message: string }>('/api/password', { method: 'POST', token, body: JSON.stringify({ current, next }) })).message,
+    changePassword: (token, current, next) => call<{ message: string; token?: string }>('/api/password', { method: 'POST', token, body: JSON.stringify({ current, next }) }),
+    logoutAll: async (token) => (await call<{ message: string }>('/api/logout-all', { method: 'POST', token })).message,
+    systemStatus: (token) => call<SystemStatus>('/api/metrics', { token }),
     reset: (token) => call('/api/reset', { method: 'POST', token }),
     exportData: (token) => call('/api/export', { token }),
     inviteInfo: async (code) => {
@@ -242,6 +268,7 @@ function browserBackend(): Backend {
 
   return {
     mode: 'browser',
+    demo: true,
     accounts: async () => read().users.map(({ id, name, role, title, org, email, initials, color }) => ({ id, name, role, title, org, email, initials, color })),
     async login(email, password) {
       const s = read();
@@ -287,8 +314,10 @@ function browserBackend(): Backend {
       if (next.length < 8) throw new ApiError('Use at least 8 characters for the new password', 400);
       creds[me] = next;
       write(read(), false);
-      return 'Password changed';
+      return { message: 'Password changed' };
     },
+    logoutAll: async () => 'Signed out everywhere',
+    systemStatus: async () => null,
     async reset(token) {
       const me = userFromToken(token);
       if (read().users.find((u) => u.id === me)?.role !== 'coordinator') throw new ApiError('Only the care coordinator can reset the workspace', 403);
@@ -344,7 +373,7 @@ export function getBackend(): Promise<Backend> {
       const res = await fetch('/api/health', { signal: ctrl.signal });
       clearTimeout(timer);
       const body = await res.json();
-      if (body?.ok) return serverBackend();
+      if (body?.ok) return serverBackend(body.demo !== false);
     } catch {
       /* no server — fall through */
     }

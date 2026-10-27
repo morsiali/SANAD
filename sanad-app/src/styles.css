@@ -7,7 +7,7 @@
   --ink: #202128;
   --ink-2: #343a46;
   --muted: #5d6474;
-  --faint: #8b94a7;
+  --faint: #646c7d;
   --line: #e7ecec;
   --line-2: #d9dee8;
   --canvas: #ffffff;
@@ -18,7 +18,7 @@
   --blue: #476adb;
   --blue-ink: #3555b8;
   --night: #1e1a35;
-  --green: #0e8f65;
+  --green: #0b7a56;
   --yellow: #ffcd00;
   --red: #c2392f;
   --grad: linear-gradient(270deg, #86c159, #79c5cd 29%, #43a8b2 51%, #5e84e2);
@@ -777,7 +777,8 @@ a.tile:hover { border-color: var(--ink); }
 .wf-roles-table { min-width: 720px; }
 .wf-roles-table th[scope='row'] { white-space: nowrap; }
 .wf-roles-table td, .wf-roles-table th { vertical-align: top; padding: 10px 8px; }
-.wf-row-dim { opacity: 0.35; }
+.wf-row-dim { background: var(--mist); }
+.wf-row-dim th, .wf-row-dim td { color: var(--muted); font-weight: 400; }
 .data-table th { font-weight: 800; color: var(--ink-2); }
 [dir='rtl'] .data-table th, [dir='rtl'] .data-table td { text-align: right; }
 
@@ -808,7 +809,7 @@ a.tile:hover { border-color: var(--ink); }
 .chip-warn { background: #fff4d6 !important; color: #7a5300; }
 .care-level { font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
 .care-high { --care: var(--red); --care-bg: #fdebea; }
-.care-assisted { --care: #b06d00; --care-bg: #fff4d6; }
+.care-assisted { --care: #8a5500; --care-bg: #fff4d6; }
 .care-independent { --care: var(--green); --care-bg: #e3f5ee; }
 .care-level { color: var(--care); background: var(--care-bg); }
 .care-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -1157,3 +1158,13 @@ fieldset.plain { border: 0; padding: 0; margin: 0; display: flex; flex-direction
 .filters select { width: auto; }
 .content { padding-bottom: 96px; }
 .mon-main > .link, .mon-main .link { align-self: flex-start; }
+
+/* display preferences (Settings → Display) */
+html[data-text='large'] body { zoom: 1.125; }
+html[data-text='larger'] body { zoom: 1.25; }
+html[data-motion='reduce'] *, html[data-motion='reduce'] *::before, html[data-motion='reduce'] *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+main:focus { outline: none; }

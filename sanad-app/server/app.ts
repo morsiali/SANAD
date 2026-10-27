@@ -8,10 +8,12 @@ import { audit } from '../shared/care-engine';
 import { msg } from '../shared/messages';
 import { domainsFor } from '../shared/access';
 import { DOC_MAX_SERVER, DOC_TYPES, sniffMatches } from '../shared/plans';
-import { createSeed } from '../shared/seed';
+import { createEmpty, createSeed } from '../shared/seed';
 import { EngineError, type Action, type State } from '../shared/types';
 import { assist, PERSON_INTENTS, type AssistRequest, type Intent } from '../shared/assistant';
 import { MODEL_INTENTS, modelConfigFromEnv, modelConfigured, modelOverview, type ModelConfig } from './model';
+import { configFromEnv, type ServerConfig } from './config';
+import { Limiter, newMetrics, requestLog, securityHeaders } from './ops';
 
 export const DEMO_PASSWORD = 'sanad123';
 
@@ -19,6 +21,8 @@ interface Persisted {
   state: State;
   secret: string;
   credentials: Record<string, string>;
+  /** Raising a person's number signs out all their existing sessions (password change, "sign out everywhere"). */
+  epochs?: Record<string, number>;
 }
 
 function hashPassword(pw: string): string {
@@ -40,13 +44,34 @@ export interface AppOptions {
   sweepMs?: number;
   /** AI model for the assistant's overview; defaults to the environment (off unless ANTHROPIC_API_KEY is set). */
   model?: ModelConfig;
+  config?: Partial<ServerConfig>;
+  /** What a brand-new data file starts with: the demo world, or an empty workspace with one coordinator. */
+  seed?: 'demo' | 'empty';
+  /** First coordinator and organisation for an empty workspace (defaults to SANAD_ADMIN_* and SANAD_ORG_NAME). */
+  initial?: { orgName: string; name: string; email: string; password: string };
+  /** Where structured log lines go (default: stdout). */
+  log?: (line: string) => void;
 }
 
 export function createApp(opts: AppOptions = {}) {
   const dataFile = opts.dataFile === undefined ? resolve('data/sanad.json') : opts.dataFile;
+  const cfg: ServerConfig = { ...configFromEnv(), ...(opts.config ?? {}) };
+  const seedKind = opts.seed ?? (cfg.demo ? 'demo' : 'empty');
   let db: Persisted;
 
   const fresh = (): Persisted => {
+    if (seedKind === 'empty') {
+      const init = opts.initial ?? {
+        orgName: process.env.SANAD_ORG_NAME ?? '',
+        name: process.env.SANAD_ADMIN_NAME ?? '',
+        email: process.env.SANAD_ADMIN_EMAIL ?? '',
+        password: process.env.SANAD_ADMIN_PASSWORD ?? '',
+      };
+      if (!init.orgName.trim() || init.name.trim().length < 2 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(init.email) || init.password.length < 12)
+        throw new Error('A new workspace needs SANAD_ORG_NAME, SANAD_ADMIN_NAME, SANAD_ADMIN_EMAIL and SANAD_ADMIN_PASSWORD (at least 12 characters). See docs/DEPLOYMENT.md.');
+      const state = createEmpty(Date.now(), { name: init.orgName.trim() }, { name: init.name.trim(), email: init.email });
+      return { state, secret: randomBytes(32).toString('hex'), credentials: { [state.users[0].id]: hashPassword(init.password) } };
+    }
     const state = createSeed();
     const credentials: Record<string, string> = {};
     const shared = hashPassword(DEMO_PASSWORD);
@@ -57,12 +82,23 @@ export function createApp(opts: AppOptions = {}) {
   if (dataFile && existsSync(dataFile)) {
     db = JSON.parse(readFileSync(dataFile, 'utf8')) as Persisted;
     db.state = upgrade(db.state); // older data files gain care teams and records without losing anything
+    // Outside demo mode, refuse a data file that still has accounts using the shared demo password.
+    if (!cfg.demo && db.state.users.some((u) => checkPassword(DEMO_PASSWORD, db.credentials[u.id]))) {
+      throw new Error('This data file contains accounts that still use the demo password. Use a new data file for real use, or start in demo mode (SANAD_DEMO=1).');
+    }
   } else {
     db = fresh();
   }
 
   const rand = () => randomBytes(12).toString('base64url');
   const modelCfg = opts.model ?? modelConfigFromEnv();
+  const log = opts.log ?? (process.env.VITEST ? () => undefined : (line: string) => console.log(line));
+  const metrics = newMetrics();
+  // Per email: the configured number. Per address: more generous, because many people can share one address.
+  const loginFails = new Limiter(cfg.loginAttempts, cfg.loginWindowMinutes * 60_000);
+  const addressFails = new Limiter(cfg.loginAttempts * 4, cfg.loginWindowMinutes * 60_000);
+  const signups = new Limiter(10, 60 * 60_000);
+  const clientErrors = new Limiter(20, 60_000);
   // Per-user request budget for the assistant.
   const assistHits = new Map<string, number[]>();
 
@@ -102,22 +138,54 @@ export function createApp(opts: AppOptions = {}) {
   };
 
   const tick = () => {
-    if (sweep(db.state)) {
-      save();
-      broadcast();
+    const t0 = Date.now();
+    try {
+      if (sweep(db.state)) {
+        save();
+        broadcast();
+      }
+    } catch (e) {
+      metrics.sweep.failures += 1;
+      log(JSON.stringify({ t: new Date().toISOString(), level: 'error', event: 'sweep_failed', message: (e as Error).message }));
     }
+    const ms = Date.now() - t0;
+    metrics.sweep.runs += 1;
+    metrics.sweep.lastAt = t0;
+    metrics.sweep.lastMs = ms;
+    metrics.sweep.maxMs = Math.max(metrics.sweep.maxMs, ms);
   };
   const timer = opts.sweepMs === 0 ? null : setInterval(tick, opts.sweepMs ?? 30_000);
   timer?.unref?.();
 
   // ---- auth ----------------------------------------------------------------
-  const sign = (userId: string) => `${userId}.${createHmac('sha256', db.secret).update(userId).digest('hex').slice(0, 40)}`;
+  // Session token: user id, issue time and session number, signed with the server secret.
+  // It expires after the configured hours, and raising the session number signs out every older token.
+  const epochOf = (userId: string) => db.epochs?.[userId] ?? 0;
+  const mac = (body: string) => createHmac('sha256', db.secret).update(body).digest('base64url');
+  const sign = (userId: string, iat = Date.now()) => {
+    const body = `${userId}.${iat.toString(36)}.${epochOf(userId)}`;
+    return `${body}.${mac(body)}`;
+  };
   const verifyToken = (token: string | undefined): string | null => {
-    if (!token) return null;
-    const userId = token.slice(0, token.lastIndexOf('.'));
-    if (!userId || sign(userId) !== token) return null;
+    if (!token || token.length > 300) return null;
+    const parts = token.split('.');
+    if (parts.length < 4) return null;
+    const sig = parts.pop()!;
+    const epoch = Number(parts.pop());
+    const iat = parseInt(parts.pop()!, 36);
+    const userId = parts.join('.');
+    const body = `${userId}.${iat.toString(36)}.${epoch}`;
+    const expected = Buffer.from(mac(body));
+    const given = Buffer.from(sig);
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+    if (!Number.isFinite(iat) || Date.now() - iat > cfg.sessionHours * 3_600_000 || iat > Date.now() + 60_000) return null;
+    if (epoch !== epochOf(userId)) return null;
     return db.state.users.some((u) => u.id === userId) ? userId : null;
   };
+  const bumpEpoch = (userId: string) => {
+    db.epochs = { ...(db.epochs ?? {}), [userId]: epochOf(userId) + 1 };
+  };
+  const clientAddress = (req: Request) => (cfg.trustProxy ? req.ip : req.socket.remoteAddress) ?? 'unknown';
 
   type AuthedRequest = Request & { userId?: string };
   const auth = (req: AuthedRequest, res: Response, next: NextFunction) => {
@@ -132,22 +200,50 @@ export function createApp(opts: AppOptions = {}) {
   // ---- routes --------------------------------------------------------------
   const app = express();
   app.disable('x-powered-by');
+  if (cfg.trustProxy) app.set('trust proxy', 1);
+  app.use(securityHeaders(cfg.hsts));
+  app.use(requestLog(metrics, log));
   app.use('/api/documents', express.json({ limit: '8mb' }));
   app.use(express.json({ limit: '200kb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true, mode: 'server', version: db.state.version }));
+  // Liveness: the process answers. Readiness: data can be read and saved.
+  app.get('/api/health', (_req, res) => res.json({ ok: true, mode: 'server', demo: cfg.demo, version: db.state.version }));
+  app.get('/api/ready', (_req, res) => {
+    try {
+      save();
+      const stale = metrics.sweep.lastAt !== null && Date.now() - metrics.sweep.lastAt > 5 * 60_000 && timer !== null;
+      res.status(stale ? 503 : 200).json({ ok: !stale, storage: dataFile ? 'file' : 'memory', lastCheck: metrics.sweep.lastAt });
+    } catch {
+      res.status(503).json({ ok: false, storage: 'unavailable' });
+    }
+  });
 
   app.get('/api/accounts', (_req, res) => {
+    // The list of demo accounts is only public in demo mode.
+    if (!cfg.demo) return res.json([]);
     res.json(db.state.users.map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title, org: u.org, email: u.email, initials: u.initials, color: u.color })));
   });
 
   app.post('/api/login', (req, res) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     const password = String(req.body?.password ?? '');
+    // Repeated failures pause sign-in for that email and for that address, without saying whether the email exists.
+    const addr = `a:${clientAddress(req)}`;
+    const wait = Math.max(loginFails.blocked(`e:${email}`), addressFails.blocked(addr));
+    if (wait > 0) {
+      metrics.lockouts += 1;
+      res.setHeader('Retry-After', String(wait));
+      return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil(wait / 60)} minute(s).` });
+    }
     const user = db.state.users.find((u) => u.email.toLowerCase() === email);
     if (!user || !checkPassword(password, db.credentials[user.id])) {
-      return res.status(401).json({ error: 'That email and password do not match. Demo accounts use “sanad123”.' });
+      loginFails.hit(`e:${email}`);
+      addressFails.hit(addr);
+      metrics.loginFailures += 1;
+      log(JSON.stringify({ t: new Date().toISOString(), level: 'warn', event: 'login_failed' }));
+      return res.status(401).json({ error: cfg.demo ? 'That email and password do not match. Demo accounts use “sanad123”.' : 'That email and password do not match.' });
     }
+    loginFails.clear(`e:${email}`);
     res.json({ token: sign(user.id), userId: user.id });
   });
 
@@ -159,6 +255,9 @@ export function createApp(opts: AppOptions = {}) {
   });
 
   app.post('/api/register', (req, res) => {
+    const addr = `r:${clientAddress(req)}`;
+    if (signups.blocked(addr)) return res.status(429).json({ error: 'Too many new accounts from here. Try again later.' });
+    signups.hit(addr);
     const body = (req.body ?? {}) as RegisterInput & { password?: string };
     const password = String(body.password ?? '');
     if (password.length < 8) return res.status(400).json({ error: 'Use at least 8 characters for the password' });
@@ -324,16 +423,27 @@ export function createApp(opts: AppOptions = {}) {
     if (!checkPassword(current, db.credentials[req.userId!])) return res.status(400).json({ error: 'Your current password is not correct' });
     if (next.length < 8) return res.status(400).json({ error: 'Use at least 8 characters for the new password' });
     db.credentials[req.userId!] = hashPassword(next);
+    // A new password signs out every other session; this one continues with a fresh token.
+    bumpEpoch(req.userId!);
     save();
-    res.json({ message: 'Password changed' });
+    res.json({ message: 'Password changed. You were signed out on other devices.', token: sign(req.userId!) });
+  });
+
+  app.post('/api/logout-all', auth, (req: AuthedRequest, res) => {
+    bumpEpoch(req.userId!);
+    save();
+    res.json({ message: 'Signed out everywhere' });
   });
 
   app.post('/api/reset', auth, (req: AuthedRequest, res) => {
+    if (!cfg.demo) return res.status(404).json({ error: 'Unknown API route' });
     const me = db.state.users.find((u) => u.id === req.userId);
     if (me?.role !== 'coordinator') return res.status(403).json({ error: 'Only the care coordinator can reset the workspace' });
     const secret = db.secret;
+    const epochs = db.epochs;
     db = fresh();
     db.secret = secret; // keep sessions valid
+    db.epochs = epochs;
     save();
     broadcast();
     res.json({ view: viewFor(db.state, req.userId!), message: 'Demo workspace reset' });
@@ -358,6 +468,43 @@ export function createApp(opts: AppOptions = {}) {
     });
   });
 
+  // Errors reported by browsers: kept short, never stored with the data, rate-limited.
+  app.post('/api/client-error', (req, res) => {
+    const addr = `c:${clientAddress(req)}`;
+    if (clientErrors.blocked(addr)) return res.status(429).end();
+    clientErrors.hit(addr);
+    metrics.clientErrors += 1;
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const clip = (v: unknown, n: number) => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, n);
+    log(JSON.stringify({ t: new Date().toISOString(), level: 'error', event: 'client_error', message: clip(b.message, 300), where: clip(b.where, 120).replace(/[?#].*$/, '') }));
+    res.status(204).end();
+  });
+
+  // Operations view for coordinators and admins: counts and timings only, no personal data.
+  app.get('/api/metrics', auth, (req: AuthedRequest, res) => {
+    const me = db.state.users.find((u) => u.id === req.userId);
+    if (me?.role !== 'coordinator' && me?.role !== 'admin') return res.status(403).json({ error: 'Only coordinators and admins can see system status' });
+    const routes = Object.entries(metrics.byRoute)
+      .map(([route, r]) => ({ route, requests: r.n, avgMs: Math.round(r.ms / r.n), maxMs: Math.round(r.max) }))
+      .sort((a, b) => b.requests - a.requests)
+      .slice(0, 15);
+    res.json({
+      uptimeSeconds: Math.round((Date.now() - metrics.startedAt) / 1000),
+      demo: cfg.demo,
+      storage: dataFile ? 'file' : 'memory',
+      model: modelConfigured(modelCfg),
+      requests: metrics.requests,
+      errors4xx: metrics.errors4xx,
+      errors5xx: metrics.errors5xx,
+      loginFailures: metrics.loginFailures,
+      lockouts: metrics.lockouts,
+      clientErrors: metrics.clientErrors,
+      sweep: metrics.sweep,
+      records: { users: db.state.users.length, people: db.state.recipients.length, tasks: db.state.tasks.length, alertsOpen: db.state.alerts.filter((a) => !a.resolvedAt).length },
+      routes,
+    });
+  });
+
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API route' }));
 
   if (opts.staticDir && existsSync(opts.staticDir)) {
@@ -365,5 +512,13 @@ export function createApp(opts: AppOptions = {}) {
     app.get('*', (_req, res) => res.sendFile(join(opts.staticDir!, 'index.html')));
   }
 
-  return { app, close: () => timer && clearInterval(timer), getState: () => db.state };
+  // Last resort: malformed JSON or an unexpected error never returns a stack trace.
+  app.use((err: Error & { status?: number; type?: string }, _req: Request, res: Response, _next: NextFunction) => {
+    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'The request could not be read.' });
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'The request is too large.' });
+    log(JSON.stringify({ t: new Date().toISOString(), level: 'error', event: 'unhandled', message: err.message }));
+    res.status(500).json({ error: 'Something went wrong on the server. Nothing was changed.' });
+  });
+
+  return { app, close: () => timer && clearInterval(timer), getState: () => db.state, metrics };
 }

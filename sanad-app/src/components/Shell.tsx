@@ -98,7 +98,15 @@ function Frame() {
 
   return (
     <div className="shell">
-      <a href="#main" className="skip">
+      <a
+        href="#main"
+        className="skip"
+        onClick={(e) => {
+          // The app uses the address hash for pages, so move focus directly instead of changing it.
+          e.preventDefault();
+          document.getElementById('main')?.focus();
+        }}
+      >
         Skip to content
       </a>
       <aside className={`side ${drawer ? 'side-open' : ''}`} aria-label="Main navigation">
@@ -149,7 +157,7 @@ function Frame() {
           </form>}
           <div className="top-right">
             {!isAdmin && (
-              <Link to="/app/report" className="btn btn-dark btn-sm top-report">
+              <Link to="/app/report" className="btn btn-dark btn-sm top-report" aria-label={t('Report a challenge')}>
                 <Icon name="plus" size={16} />
                 <span>Report</span>
               </Link>
@@ -190,7 +198,7 @@ function Frame() {
             </div>
           </div>
         </header>
-        <main id="main" className={`content ${assistant.isOpen ? 'content-with-assist' : ''}`}>
+        <main id="main" tabIndex={-1} className={`content ${assistant.isOpen ? 'content-with-assist' : ''}`}>
           <Outlet />
         </main>
       </div>
