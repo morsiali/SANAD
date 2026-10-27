@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { STAGES, STAGE_LABEL } from '../../shared/types';
+import { STAGES, STAGE_LABEL, isHousehold } from '../../shared/types';
 import { metrics } from '../../shared/analytics';
 import { isActive } from '../../shared/routing';
 import { LIVING_LABEL, SUPPORT_LABEL, SUPPORT_LEVELS, inCareGroup } from '../../shared/care';
@@ -12,7 +12,7 @@ export function Analytics() {
   const { view, me, now } = useSession();
   const [days, setDays] = useState(14);
   const scoped = useMemo(
-    () => (me.role === 'coordinator' ? view.challenges : me.role === 'family' ? view.challenges.filter((c) => me.recipients.includes(c.recipientId)) : view.challenges.filter((c) => c.assigneeId === me.id || c.reporterId === me.id || c.role === me.role)),
+    () => (me.role === 'coordinator' ? view.challenges : isHousehold(me.role) ? view.challenges.filter((c) => me.recipients.includes(c.recipientId)) : view.challenges.filter((c) => c.assigneeId === me.id || c.reporterId === me.id || c.role === me.role)),
     [view, me],
   );
   const m = useMemo(() => metrics(scoped, now, days), [scoped, now, days]);
@@ -24,7 +24,7 @@ export function Analytics() {
       return { ...g, count: inGroup.length, open: inGroup.filter((c) => isActive(c)).length, people: people.filter((r) => inCareGroup(r, g.key)).length };
     });
   }, [scoped, view.recipients, me]);
-  const scopeLabel = me.role === 'coordinator' ? 'the whole care network' : me.role === 'family' ? 'your family' : 'you and your team';
+  const scopeLabel = me.role === 'coordinator' ? 'the whole care network' : isHousehold(me.role) ? 'your family' : 'you and your team';
 
   const kpis = [
     { label: 'Solved within response time', value: m.slaCompliance === null ? '—' : `${m.slaCompliance}%` },

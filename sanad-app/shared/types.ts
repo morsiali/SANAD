@@ -2,25 +2,40 @@ import type { CareNeed, Living, SupportLevel } from './care';
 // SANAD domain model — shared by the server, the browser and the tests.
 
 export type Role =
+  | 'self'
   | 'family'
   | 'caregiver'
   | 'doctor'
+  | 'psychologist'
+  | 'physio'
+  | 'educator'
   | 'coordinator'
+  | 'admin'
   | 'transport'
   | 'pharmacy'
   | 'social';
 
-export const ROLES: Role[] = ['family', 'caregiver', 'doctor', 'coordinator', 'transport', 'pharmacy', 'social'];
+export const ROLES: Role[] = ['self', 'family', 'caregiver', 'doctor', 'psychologist', 'physio', 'educator', 'coordinator', 'admin', 'transport', 'pharmacy', 'social'];
 
 export const ROLE_LABEL: Record<Role, string> = {
+  self: 'Person receiving care',
   family: 'Family',
   caregiver: 'Caregiver',
   doctor: 'Doctor',
+  psychologist: 'Psychologist',
+  physio: 'Physiotherapist',
+  educator: 'Educator',
   coordinator: 'Care coordinator',
+  admin: 'Organisation admin',
   transport: 'Transport',
   pharmacy: 'Pharmacy',
   social: 'Social services',
 };
+
+/** The household side of care: the person themselves and their family. They report problems and confirm fixes. */
+export const isHousehold = (role: Role) => role === 'family' || role === 'self';
+/** Roles that write professional records (assessments, plans, verified diagnoses). */
+export const PROFESSIONAL_ROLES: Role[] = ['doctor', 'psychologist', 'physio', 'educator'];
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'urgent'];
@@ -45,6 +60,8 @@ export type Category =
   | 'equipment'
   | 'wellbeing'
   | 'scheduling'
+  | 'learning'
+  | 'rehab'
   | 'general';
 
 export const CATEGORY_LABEL: Record<Category, string> = {
@@ -56,6 +73,8 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   equipment: 'Equipment & home',
   wellbeing: 'Wellbeing',
   scheduling: 'Scheduling',
+  learning: 'School & learning',
+  rehab: 'Physio & rehab',
   general: 'General',
 };
 
@@ -70,8 +89,10 @@ export interface User {
   color: string;
   available: boolean;
   skills: string[];
-  /** Care recipients this person is linked to (family members, regular carers). */
+  /** People this person is on the care team for. Kept in step with active memberships by the engine. */
   recipients: string[];
+  /** Organisation for staff (coordinators and admins only act inside their own organisation). */
+  orgId?: string | null;
 }
 
 export interface Recipient {
@@ -84,6 +105,198 @@ export interface Recipient {
   support?: SupportLevel;
   living?: Living;
   needs?: CareNeed[];
+  /** Organisation that coordinates this person's care. */
+  orgId?: string;
+  preferredName?: string;
+  /** How they like to be spoken to and kept informed. */
+  communication?: string;
+  languages?: string[];
+  /** Small avatar image as a data URL (optional). */
+  photo?: string;
+  /** Profile sections that do not apply to this person. */
+  hidden?: Domain[];
+  updatedAt?: number;
+  /** Bumped whenever who-can-see-what changes; approvals are bound to it. */
+  accessVersion?: number;
+  /** Only the name is shared (a problem about them is visible, but you are not on their care team). */
+  limited?: boolean;
+}
+
+// ---------------------------------------------------------------- access, consent and approvals
+
+/** Kinds of information on a profile. Access is granted per domain. */
+export type Domain = 'overview' | 'medical' | 'wellbeing' | 'wellbeing_notes' | 'academic' | 'social' | 'activity' | 'rehab' | 'team';
+
+/** Legal authority over the person's care decisions. Never assumed from family relationship alone. */
+export type Authority = 'none' | 'self' | 'guardian';
+
+export interface Organisation {
+  id: string;
+  name: string;
+}
+
+export interface Membership {
+  id: string;
+  recipientId: string;
+  userId: string;
+  relationship: string;
+  authority: Authority;
+  /** Authority is only used once a coordinator or admin has checked the evidence. */
+  authorityVerified: boolean;
+  authorityEvidence?: string;
+  domains: Domain[];
+  status: 'active' | 'revoked';
+  grantedBy: string;
+  createdAt: number;
+  /** Time-limited access ends automatically. */
+  expiresAt?: number | null;
+  revokedAt?: number;
+  revokedBy?: string;
+}
+
+export interface Invite {
+  id: string;
+  code: string;
+  recipientId: string;
+  email: string;
+  role: Role;
+  relationship: string;
+  domains: Domain[];
+  invitedBy: string;
+  createdAt: number;
+  expiresAt: number;
+  /** How long access lasts after acceptance (days); null = until revoked. */
+  accessDays: number | null;
+  status: 'pending' | 'accepted' | 'expired' | 'cancelled';
+  acceptedBy?: string;
+}
+
+export interface Consent {
+  id: string;
+  recipientId: string;
+  /** The person whose access changed. */
+  subjectId: string;
+  change: 'grant' | 'revoke';
+  domains: Domain[];
+  /** Who agreed: the person themselves, their verified guardian, or a coordinator recording paper/verbal consent. */
+  basis: 'self' | 'guardian' | 'recorded' | 'creator';
+  givenBy: string;
+  evidence?: string;
+  at: number;
+}
+
+export type ApprovalStatus = 'pending' | 'executed' | 'rejected' | 'expired' | 'failed' | 'cancelled';
+
+export interface Approval {
+  id: string;
+  recipientId: string;
+  requestedBy: string;
+  /** Who may decide (verified authority holders for the person). */
+  approverIds: string[];
+  /** The exact action that will run, as the requester, if approved. */
+  action: Action;
+  /** Stable fingerprint of the action; the approver must approve this exact fingerprint. */
+  fingerprint: string;
+  /** Snapshot of what the action depends on (e.g. the member's current access). If it changed, the approval cannot run. */
+  baseVersion: string;
+  summary: Msg;
+  reason: string;
+  reversible: boolean;
+  createdAt: number;
+  expiresAt: number;
+  status: ApprovalStatus;
+  decidedBy?: string;
+  decidedAt?: number;
+  error?: Msg;
+}
+
+export interface AuditEvent {
+  id: string;
+  at: number;
+  actorId: string;
+  recipientId: string | null;
+  /** Domain of the information involved; the event is only shown to people who can see that domain. */
+  domain: Domain;
+  type: string;
+  m: Msg;
+  targetId?: string;
+}
+
+// ---------------------------------------------------------------- care records
+
+export type RecordSource = 'self' | 'caregiver' | 'professional' | 'ai';
+export type Verification = 'unverified' | 'verified';
+
+export interface RecordEdit {
+  at: number;
+  by: string;
+  fields: string[];
+  before: Record<string, string | number | null>;
+}
+
+export interface CareRecord {
+  id: string;
+  recipientId: string;
+  domain: Domain;
+  kind: string;
+  title: string;
+  body: string;
+  value?: number | null;
+  unit?: string;
+  /** When it happened or was measured (defaults to when it was recorded). */
+  observedAt: number;
+  source: RecordSource;
+  authorId: string;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+  verification: Verification;
+  verifiedBy?: string;
+  verifiedAt?: number;
+  archived?: boolean;
+  history: RecordEdit[];
+}
+
+export interface Medication {
+  id: string;
+  recipientId: string;
+  name: string;
+  strength: string;
+  dose: string;
+  route: string;
+  /** Times of day, "HH:MM". */
+  times: string[];
+  startDate?: string;
+  endDate?: string;
+  prescriber: string;
+  instructions: string;
+  reminders: boolean;
+  /** Units on hand and units used per dose, as entered by a person. Used only for refill reminders. */
+  onHand: number | null;
+  perDose: number | null;
+  supplyUpdatedAt?: number;
+  active: boolean;
+  source: RecordSource;
+  authorId: string;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+  verification: Verification;
+  verifiedBy?: string;
+  history: RecordEdit[];
+}
+
+/** One scheduled dose and what is known about it. A reminder is never treated as "taken". */
+export interface DoseLog {
+  id: string;
+  medicationId: string;
+  recipientId: string;
+  /** "YYYY-MM-DD HH:MM" in local time. */
+  slot: string;
+  status: 'taken' | 'missed' | 'skipped' | 'unknown';
+  note: string;
+  by: string;
+  at: number;
 }
 
 export interface ChecklistItem {
@@ -207,6 +420,8 @@ export interface Settings {
 
 export interface State {
   version: number;
+  /** Data format version; older saved data is upgraded on load without losing anything. */
+  schema?: number;
   seq: number;
   users: User[];
   recipients: Recipient[];
@@ -215,12 +430,23 @@ export interface State {
   playbooks: Playbook[];
   notifications: Notification[];
   settings: Settings;
+  orgs: Organisation[];
+  memberships: Membership[];
+  invites: Invite[];
+  consents: Consent[];
+  approvals: Approval[];
+  audit: AuditEvent[];
+  records: CareRecord[];
+  medications: Medication[];
+  doseLogs: DoseLog[];
 }
 
 /** What a signed-in user receives: the state filtered to what they may see. */
 export interface View extends State {
   me: string;
   loads: Record<string, number>;
+  /** What the viewer may see for each person they can open: recipientId -> domains. */
+  access: Record<string, Domain[]>;
 }
 
 export type Action =
@@ -253,7 +479,43 @@ export type Action =
   | { type: 'delete_playbook'; id: string }
   | { type: 'update_settings'; settings: Settings }
   | { type: 'add_recipient'; name: string; age: number; area: string; note: string; familyIds: string[]; support?: SupportLevel; living?: Living; needs?: CareNeed[] }
-  | { type: 'update_recipient'; recipientId: string; age: number; area: string; note: string; support: SupportLevel; living: Living; needs: CareNeed[] };
+  | { type: 'update_recipient'; recipientId: string; age: number; area: string; note: string; support: SupportLevel; living: Living; needs: CareNeed[] }
+  // profile & records
+  | { type: 'update_preferences'; recipientId: string; preferredName: string; communication: string; languages: string[]; hidden: Domain[]; photo?: string | null }
+  | { type: 'add_record'; recipientId: string; domain: Domain; kind: string; title: string; body: string; value?: number | null; unit?: string; observedAt?: number }
+  | { type: 'edit_record'; recordId: string; baseVersion: number; title: string; body: string; value?: number | null; unit?: string; observedAt?: number }
+  | { type: 'verify_record'; recordId: string }
+  | { type: 'archive_record'; recordId: string; reason: string }
+  | { type: 'add_medication'; recipientId: string; med: MedicationInput }
+  | { type: 'edit_medication'; medicationId: string; baseVersion: number; med: MedicationInput }
+  | { type: 'verify_medication'; medicationId: string }
+  | { type: 'log_dose'; medicationId: string; slot: string; status: DoseLog['status']; note: string }
+  | { type: 'update_supply'; medicationId: string; onHand: number }
+  // care team, consent and approvals
+  | { type: 'invite_member'; recipientId: string; email: string; role: Role; relationship: string; domains: Domain[]; accessDays: number | null; code?: string; evidence?: string }
+  | { type: 'cancel_invite'; inviteId: string }
+  | { type: 'accept_invite'; code: string }
+  | { type: 'set_access'; membershipId: string; domains: Domain[]; evidence?: string }
+  | { type: 'revoke_member'; membershipId: string; reason: string }
+  | { type: 'verify_authority'; membershipId: string; evidence: string }
+  | { type: 'decide_approval'; approvalId: string; decision: 'approve' | 'reject'; fingerprint: string }
+  | { type: 'cancel_approval'; approvalId: string };
+
+export interface MedicationInput {
+  name: string;
+  strength: string;
+  dose: string;
+  route: string;
+  times: string[];
+  startDate?: string;
+  endDate?: string;
+  prescriber: string;
+  instructions: string;
+  reminders: boolean;
+  onHand: number | null;
+  perDose: number | null;
+  active: boolean;
+}
 
 export class EngineError extends Error {
   status: number;

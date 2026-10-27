@@ -84,13 +84,13 @@ await step('wrong password shows a clear error', async () => {
 });
 
 console.log('\nEvery page for every role');
-const roles = ['mariam@sanad.ae', 'aisha@sanad.ae', 'kareem@sanad.ae', 'sara@sanad.ae', 'yousef@sanad.ae', 'omar@sanad.ae', 'noura@sanad.ae'];
+const roles = ['mariam@sanad.ae', 'aisha@sanad.ae', 'kareem@sanad.ae', 'sara@sanad.ae', 'yousef@sanad.ae', 'omar@sanad.ae', 'noura@sanad.ae', 'khadija@sanad.ae', 'huda@sanad.ae', 'salma@sanad.ae', 'faisal@sanad.ae', 'grace@sanad.ae', 'majid@sanad.ae', 'hind@sanad.ae'];
 for (const email of roles) {
   await step(`${email.split('@')[0]}: all navigation links open real pages`, async () => {
     const p = await person(email);
     const links = await p.locator('.side-nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
   links.push('#/app/team?tab=people', '#/app/team?tab=people&group=need');
-    if (links.length < 10) throw new Error(`only ${links.length} nav links`);
+    if (links.length < 7) throw new Error(`only ${links.length} nav links`);
     for (const href of links) {
       await p.goto(`http://localhost:${PORT}/${href}`);
       await p.getByRole('heading', { level: 1 }).first().waitFor();
@@ -260,7 +260,7 @@ await step('team: add a member, set availability, add a person we care for', asy
   await card.locator('.switch').click();
   await text(sara, 'Yousef Karim is away');
   await card.locator('.switch').click();
-  await sara.getByRole('tab', { name: 'People we care for' }).click();
+  await go(sara, '/app/people');
   await btn(sara, 'Add person').click();
   await sara.getByLabel('Full name').fill('Salem Rashid');
   await sara.getByLabel('Area').fill('Jumeirah, Dubai');
@@ -449,8 +449,7 @@ await step('coordinator accounts cannot be self-registered', async () => {
 console.log('\nCare categories');
 await step('coordinator sees people grouped and filtered by care category', async () => {
   const p = await person('sara@sanad.ae');
-  await go(p, '/app/team');
-  await p.getByRole('tab', { name: 'People we care for' }).click();
+  await go(p, '/app/people');
   await p.locator('.care-tile').first().waitFor();
   if ((await p.locator('.care-tile').count()) !== 3) throw new Error('expected 3 support tiles');
   await p.locator('.care-group-head', { hasText: 'High support' }).waitFor();
@@ -470,7 +469,7 @@ await step('coordinator sees people grouped and filtered by care category', asyn
 });
 await step('family edits a care profile; challenges filter by care group', async () => {
   const p = await person('mariam@sanad.ae');
-  await go(p, '/app/team?tab=people');
+  await go(p, '/app/people');
   await p.locator('.person-card', { hasText: 'Fatima Al Noor' }).getByRole('button', { name: 'Edit care profile' }).click();
   await p.locator('.modal #edit-care-support-high').click();
   await p.locator('.modal #edit-care-need-memory').check();
@@ -493,9 +492,137 @@ await step('family edits a care profile; challenges filter by care group', async
 });
 await step('carers cannot edit care profiles', async () => {
   const p = await person('aisha@sanad.ae');
-  await go(p, '/app/team?tab=people');
+  await go(p, '/app/people');
   await p.locator('.person-card').first().waitFor();
   if (await p.getByRole('button', { name: 'Edit care profile' }).count()) throw new Error('carer should not see edit');
+  await p.context().close();
+});
+
+console.log('\nProfiles, records and permissions');
+await step('guardian opens a child’s profile and records a check-in with its source', async () => {
+  const p = await person('huda@sanad.ae');
+  await p.locator('.side-nav a[href="#/app/people"]').click();
+  await p.getByRole('link', { name: 'Rashid Al Hammadi' }).first().click();
+  await p.getByRole('heading', { name: 'Rashid Al Hammadi', level: 1 }).waitFor();
+  for (const tab of ['Medical', 'Psychological well-being', 'Academic development', 'Care team & permissions', 'Activity history']) await p.getByRole('tab', { name: tab }).waitFor();
+  await p.getByRole('tab', { name: 'Psychological well-being' }).click();
+  if (await p.getByText('Private therapy notes').count()) throw new Error('guardian should not see private notes');
+  await p.locator('#sec-wellbeing').locator('..').getByRole('button', { name: 'Add a record' }).click();
+  await p.locator('#rec-kind').selectOption('checkin');
+  await p.locator('#rec-title').fill('Calm after swimming');
+  await p.locator('#rec-value').fill('4');
+  await modalBtn(p, 'Add record').click();
+  await text(p, 'Well-being check-in added');
+  const rec = p.locator('.rec', { hasText: 'Calm after swimming' });
+  await rec.getByText('Caregiver observation').waitFor();
+  await rec.getByText('Not verified').waitFor();
+  await p.context().close();
+});
+await step('educator sees academic and social only, not therapy or medical (UI and direct links)', async () => {
+  const p = await person('grace@sanad.ae');
+  await go(p, '/app/people/r-rashid');
+  await p.getByRole('tab', { name: 'Academic development' }).waitFor();
+  for (const tab of ['Medical', 'Psychological well-being', 'Care team & permissions']) if (await p.getByRole('tab', { name: tab }).count()) throw new Error(`educator should not see ${tab}`);
+  await go(p, '/app/people/r-rashid?tab=wellbeing_notes');
+  await p.getByRole('heading', { name: 'Latest in each section' }).waitFor();
+  if (await p.getByText('coping cards', { exact: false }).count()) throw new Error('private note leaked');
+  await go(p, '/app/people/r-fatima');
+  await p.getByText('You can’t open this profile').waitFor();
+  await go(p, '/app/intelligence?q=therapy%20session%20Rashid');
+  await p.waitForTimeout(400);
+  if (await p.getByText('coping cards', { exact: false }).count()) throw new Error('assistant leaked a private note');
+  await p.context().close();
+});
+await step('carer logs a dose; the medicine shows supply and verification', async () => {
+  const p = await person('aisha@sanad.ae');
+  await go(p, '/app/people/r-fatima?tab=medical');
+  const med = p.locator('.med', { hasText: 'Metformin' });
+  await med.getByText('Verified by Dr. Kareem Hassan').waitFor();
+  await med.getByText(/Refill soon/).waitFor();
+  const slot = med.locator('.dose-slot').filter({ has: p.locator('.dose-btns') }).first();
+  await slot.getByRole('button', { name: 'Taken' }).click();
+  await text(p, 'Dose marked as taken');
+  await slot.locator('.dose-taken').waitFor();
+  await p.context().close();
+});
+await step('guardian approves a coordinator’s request; the invitation then appears', async () => {
+  const p = await person('mariam@sanad.ae');
+  await p.locator('.side-nav a[href="#/app/approvals"]').click();
+  const card = p.locator('.approval-card', { hasText: 'nadia@rahma.ae' });
+  await card.getByText('Includes sensitive information: Medical').waitFor();
+  await card.getByRole('button', { name: 'Approve' }).click();
+  await text(p, 'Approved and done');
+  await card.getByText('Approved and done').first().waitFor();
+  await p.context().close();
+  const sara = await person('sara@sanad.ae');
+  await go(sara, '/app/people/r-fatima?tab=team');
+  await sara.locator('.invite', { hasText: 'nadia@rahma.ae' }).getByRole('button', { name: 'Copy link' }).waitFor();
+  await sara.context().close();
+});
+await step('invitation link: a new coach signs up and sees only what was shared', async () => {
+  const huda = await person('huda@sanad.ae');
+  await go(huda, '/app/people/r-rashid?tab=team');
+  await huda.getByRole('button', { name: 'Invite someone' }).click();
+  await huda.locator('#inv-email').fill('coach.sam@club.ae');
+  await huda.locator('#inv-role').selectOption('educator');
+  await huda.locator('#inv-rel').fill('Swimming coach');
+  await huda.locator('#inv-d-academic').uncheck();
+  await huda.locator('#inv-d-social').uncheck();
+  await huda.locator('#inv-d-activity').check();
+  await huda.locator('#inv-days').selectOption('30');
+  await modalBtn(huda, 'Create invitation').click();
+  await text(huda, 'Invitation ready for coach.sam@club.ae');
+  const link = await huda.locator('.invite', { hasText: 'coach.sam@club.ae' }).locator('.invite-link').inputValue();
+  await huda.context().close();
+  const p = await person(null);
+  await p.goto(link.replace(/^https?:\/\/[^/]+\//, `http://localhost:${PORT}/`));
+  await p.getByText('You are invited to join Rashid’s care team as Educator').waitFor();
+  if ((await p.locator('#reg-email').inputValue()) !== 'coach.sam@club.ae') throw new Error('email not prefilled');
+  await p.locator('#reg-name').fill('Sam Coach');
+  await p.locator('#reg-password').fill('coach12345');
+  await p.locator('#reg-confirm').fill('coach12345');
+  await btn(p, 'Create account').click();
+  await p.getByRole('heading', { level: 1 }).filter({ hasText: 'Sam' }).waitFor();
+  await go(p, '/app/people/r-rashid');
+  await p.getByRole('tab', { name: 'Sports & activity' }).waitFor();
+  if (await p.getByRole('tab', { name: 'Academic development' }).count()) throw new Error('coach should not see academics');
+  await p.context().close();
+});
+await step('guardian removes the teacher; access ends immediately', async () => {
+  const huda = await person('huda@sanad.ae');
+  await go(huda, '/app/people/r-rashid?tab=team');
+  await huda.locator('.member', { hasText: 'Grace Thomas' }).getByRole('button', { name: 'Remove' }).click();
+  await huda.locator('#revoke-reason').fill('End of school year');
+  await modalBtn(huda, 'Remove access').click();
+  await text(huda, 'Grace Thomas no longer has access');
+  await huda.locator('table.consent-table').getByText('Removed').first().waitFor();
+  await huda.context().close();
+  const grace = await person('grace@sanad.ae');
+  await go(grace, '/app/people/r-rashid');
+  await grace.getByText('You can’t open this profile').waitFor();
+  await grace.context().close();
+});
+await step('the person receiving care sees their own care and logs pain', async () => {
+  const p = await person('khadija@sanad.ae');
+  await p.locator('.side-nav a[href="#/app/people"]').click();
+  await p.getByRole('heading', { name: 'My care' }).waitFor();
+  await go(p, '/app/people/r-khadija?tab=rehab');
+  await p.getByText('Straight-leg raises').first().waitFor();
+  await p.locator('#sec-rehab').locator('..').getByRole('button', { name: 'Add a record' }).click();
+  await p.locator('#rec-kind').selectOption('pain');
+  await p.locator('#rec-title').fill('Pain after evening set');
+  await p.locator('#rec-value').fill('2');
+  await modalBtn(p, 'Add record').click();
+  await p.locator('.rec', { hasText: 'Pain after evening set' }).getByText('Self-reported').waitFor();
+  await p.context().close();
+});
+await step('organisation admin manages access but sees no records and cannot report', async () => {
+  const p = await person('majid@sanad.ae');
+  await p.getByText('People in your organisation').waitFor();
+  if (await p.locator('.side-nav a[href="#/app/report"]').count()) throw new Error('admin should not report');
+  await go(p, '/app/people/r-fatima');
+  if (await p.getByRole('tab', { name: 'Medical' }).count()) throw new Error('admin should not see medical');
+  await p.getByRole('tab', { name: 'Care team & permissions' }).waitFor();
   await p.context().close();
 });
 
@@ -548,6 +675,7 @@ const englishLeft = async (page) =>
       if (!r.width && !r.height) continue;
       const typed = /^(Hessa|Ali|Reem|Salem|Saleh|Jumeirah|Dubai)$/; // names and places typed by people who signed up during this run
       if (n.nodeValue.trim() === 'Dialysis on Mondays and Thursdays. Lives alone.') continue; // a care note typed during this run
+      if (['Calm after swimming', 'Sam Coach', 'Swimming coach', 'End of school year', 'Pain after evening set', 'Salem Rashid', 'Weekend relief carer'].some((x) => n.nodeValue.includes(x))) continue; // typed during this run
       const words = n.nodeValue.split(/[\s·,()“”«»:]+/).filter((x) => /[A-Za-z]{3,}/.test(x) && !typed.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN)$/.test(x));
       if (words.length) out.push(n.nodeValue.trim());
     }
@@ -591,7 +719,7 @@ await step('every page reads fully in Arabic (coordinator)', async () => {
   await p.click('form button[type=submit]');
   await p.getByRole('heading', { level: 1 }).first().waitFor();
   const links = await p.locator('.side-nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
-  links.push('#/app/team?tab=people', '#/app/team?tab=people&group=need');
+  links.push('#/app/team?tab=people', '#/app/people?group=need', '#/app/people/r-fatima', '#/app/people/r-fatima?tab=team', '#/app/people/r-fatima?tab=history');
   const leftovers = [];
   for (const href of links) {
     await p.goto(`http://localhost:${PORT}/${href}`);
@@ -607,6 +735,35 @@ await step('every page reads fully in Arabic (coordinator)', async () => {
   await p.locator('.seg button', { hasText: 'English' }).click();
   await p.getByRole('heading', { name: 'Settings' }).waitFor();
   await ctx.close();
+});
+
+await step('profile sections read fully in Arabic (guardian and psychologist)', async () => {
+  const leftovers = [];
+  for (const [email, paths] of [
+    ['huda@sanad.ae', ['/app/people', '/app/people/r-rashid', '/app/people/r-rashid?tab=medical', '/app/people/r-rashid?tab=wellbeing', '/app/people/r-rashid?tab=academic', '/app/people/r-rashid?tab=social', '/app/people/r-rashid?tab=activity', '/app/people/r-rashid?tab=rehab', '/app/people/r-rashid?tab=team', '/app/people/r-rashid?tab=history', '/app/approvals']],
+    ['salma@sanad.ae', ['/app/people/r-rashid?tab=wellbeing']],
+    ['mariam@sanad.ae', ['/app/people/r-fatima?tab=medical', '/app/approvals']],
+  ]) {
+    const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    await ctx.addInitScript(() => localStorage.setItem('sanad.lang', 'ar'));
+    const p = await ctx.newPage();
+    p.on('pageerror', (e) => problems.push(`[ar ${email}] page error: ${e.message}`));
+    await go(p, '/signin');
+    await p.fill('input[type=email]', email);
+    await p.fill('input[type=password]', 'sanad123');
+    await p.click('form button[type=submit]');
+    await p.getByRole('heading', { level: 1 }).first().waitFor();
+    for (const path of paths) {
+      await go(p, path);
+      await p.getByRole('heading', { level: 1 }).first().waitFor();
+      await p.waitForTimeout(250);
+      for (const x of await englishLeft(p)) leftovers.push(`${email} ${path}: ${x}`);
+    }
+    const overflow = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    if (overflow) leftovers.push(`${email}: horizontal scroll in RTL`);
+    await ctx.close();
+  }
+  if (leftovers.length) throw new Error(`English left: ${[...new Set(leftovers)].slice(0, 6).join(' | ')}`);
 });
 
 await browser.close();

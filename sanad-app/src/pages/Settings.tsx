@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ROLE_LABEL } from '../../shared/types';
+import { ROLE_LABEL, isHousehold } from '../../shared/types';
 import { useSession } from '../lib/store';
 import { downloadJson } from '../lib/format';
 import { useLanguage } from '../lib/lang';
@@ -85,7 +85,7 @@ export function SettingsPage() {
           <Field label="Job title">
             <input value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          {me.role !== 'family' && (
+          {!isHousehold(me.role) && (
             <Field label="Skills" hint="Comma separated. Problems that mention these come to you first.">
               <input value={skills} onChange={(e) => setSkills(e.target.value)} />
             </Field>
@@ -96,7 +96,7 @@ export function SettingsPage() {
         </form>
 
         <div className="stack">
-          {me.role !== 'family' && (
+          {!isHousehold(me.role) && (
             <section className="panel">
               <header className="panel-head">
                 <h2>Availability</h2>

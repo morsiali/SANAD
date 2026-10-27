@@ -80,6 +80,43 @@ describe('API', () => {
     expect(dup.status).toBe(409);
   });
 
+  it('never sends private therapy notes to an educator, in state or export, and audits exports', async () => {
+    const grace = await login('grace@sanad.ae');
+    const state = await request(app).get('/api/state').set('Authorization', `Bearer ${grace}`);
+    expect(state.status).toBe(200);
+    expect(JSON.stringify(state.body)).not.toContain('coping cards for transitions');
+    expect(state.body.access['r-rashid']).toEqual(['overview', 'academic', 'social']);
+    const exp = await request(app).get('/api/export').set('Authorization', `Bearer ${grace}`);
+    expect(JSON.stringify(exp.body)).not.toContain('coping cards for transitions');
+    const salma = await login('salma@sanad.ae');
+    const salmaState = await request(app).get('/api/state').set('Authorization', `Bearer ${salma}`);
+    expect(JSON.stringify(salmaState.body)).toContain('coping cards for transitions');
+    const write = await request(app).post('/api/action').set('Authorization', `Bearer ${grace}`).send({ action: { type: 'add_record', recipientId: 'r-rashid', domain: 'wellbeing_notes', kind: 'progress_note', title: 'x', body: '' } });
+    expect(write.status).toBe(403);
+  });
+
+  it('creates invitations with server-generated codes that can be looked up and used once', async () => {
+    const huda = await login('huda@sanad.ae');
+    const res = await request(app)
+      .post('/api/action')
+      .set('Authorization', `Bearer ${huda}`)
+      .send({ action: { type: 'invite_member', recipientId: 'r-rashid', email: 'coach@club.ae', role: 'educator', relationship: 'Swimming coach', domains: ['overview', 'activity'], accessDays: 30, code: 'chosen-by-client' } });
+    expect(res.status).toBe(200);
+    const inv = res.body.view.invites.find((i: { id: string }) => i.id === res.body.createdId);
+    expect(inv.code).not.toBe('chosen-by-client');
+    expect(inv.code.length).toBeGreaterThanOrEqual(16);
+    const info = await request(app).get(`/api/invite/${inv.code}`);
+    expect(info.body).toEqual({ role: 'educator', email: 'coach@club.ae', recipient: 'Rashid', status: 'pending' });
+    expect((await request(app).get('/api/invite/not-a-code')).status).toBe(404);
+    const reg = await request(app).post('/api/register').send({ role: 'educator', name: 'Coach Sam', email: 'coach@club.ae', password: 'coach12345', inviteCode: inv.code });
+    expect(reg.status).toBe(200);
+    const st = await request(app).get('/api/state').set('Authorization', `Bearer ${reg.body.token}`);
+    expect(st.body.access['r-rashid']).toEqual(['overview', 'activity']);
+    expect(JSON.stringify(st.body)).not.toContain('Mild spastic diplegia');
+    const again = await request(app).post('/api/register').send({ role: 'educator', name: 'Coach Two', email: 'coach2@club.ae', password: 'coach12345', inviteCode: inv.code });
+    expect(again.status).toBe(409);
+  });
+
   it('changes passwords', async () => {
     const token = await login('noura@sanad.ae');
     const bad = await request(app).post('/api/password').set('Authorization', `Bearer ${token}`).send({ current: 'x', next: 'longenough' });

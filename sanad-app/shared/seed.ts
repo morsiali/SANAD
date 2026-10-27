@@ -1,8 +1,12 @@
-// Demo world: three families in Dubai and the people who support them.
+// Demo world: four families in Dubai, a second organisation in Sharjah, and the people who support them.
+// All people and records are synthetic.
 // The history is produced by replaying real actions through the engine, so every
 // routing decision, notification and audit entry is genuine.
-import type { Action, Playbook, Rule, State, User } from './types';
+import type { Action, Consent, Domain, Membership, Playbook, Rule, State, User } from './types';
 import { apply, sweep } from './engine';
+import { syncLinks } from './care-engine';
+import { ROLE_DOMAINS } from './access';
+import { dayKey } from './records';
 
 const H = 3.6e6;
 
@@ -17,6 +21,32 @@ const users: User[] = [
   { id: 'u-yousef', name: 'Yousef Karim', role: 'transport', title: 'Dispatcher', org: 'CareRide', email: 'yousef@sanad.ae', initials: 'YK', color: '#2B7BB9', available: true, skills: ['wheelchair', 'dialysis'], recipients: [] },
   { id: 'u-omar', name: 'Omar Farouk', role: 'pharmacy', title: 'Pharmacist', org: 'Al Noor Pharmacy', email: 'omar@sanad.ae', initials: 'OF', color: '#9A6B3F', available: true, skills: ['refill', 'insulin', 'delivery'], recipients: [] },
   { id: 'u-noura', name: 'Noura Al Suwaidi', role: 'social', title: 'Social worker', org: 'Community Development Authority', email: 'noura@sanad.ae', initials: 'NA', color: '#476ADB', available: true, skills: ['thiqa', 'emirates id', 'loneliness', 'equipment'], recipients: [] },
+  { id: 'u-khadija', name: 'Khadija Saeed', role: 'self', title: 'Person receiving care', org: 'Self', email: 'khadija@sanad.ae', initials: 'KS', color: '#D2566B', available: true, skills: [], recipients: [] },
+  { id: 'u-huda', name: 'Huda Al Hammadi', role: 'family', title: 'Mother of Rashid', org: 'Family', email: 'huda@sanad.ae', initials: 'HH', color: '#7A5AC8', available: true, skills: [], recipients: [] },
+  { id: 'u-salma', name: 'Dr. Salma Idris', role: 'psychologist', title: 'Clinical psychologist', org: 'Mind Well Clinic', email: 'salma@sanad.ae', initials: 'SI', color: '#1F9E8F', available: true, skills: ['anxiety', 'coping', 'transitions'], recipients: [] },
+  { id: 'u-faisal', name: 'Faisal Nasser', role: 'physio', title: 'Physiotherapist', org: 'Move Well Rehab', email: 'faisal@sanad.ae', initials: 'FN', color: '#3E8E3A', available: true, skills: ['knee', 'strength', 'exercises', 'walking'], recipients: [] },
+  { id: 'u-grace', name: 'Grace Thomas', role: 'educator', title: 'Class teacher', org: 'Al Mizhar Primary School', email: 'grace@sanad.ae', initials: 'GT', color: '#C9861A', available: true, skills: ['iep', 'homework', 'robotics'], recipients: [] },
+  { id: 'u-majid', name: 'Majid Saeed', role: 'admin', title: 'Organisation admin', org: 'SANAD Care Hub', email: 'majid@sanad.ae', initials: 'MS', color: '#202128', available: true, skills: [], recipients: [], orgId: 'org-hub' },
+  { id: 'u-hind', name: 'Hind Al Zaabi', role: 'coordinator', title: 'Care coordinator', org: 'Noor Community Care', email: 'hind@sanad.ae', initials: 'HZ', color: '#2B7BB9', available: true, skills: [], recipients: [], orgId: 'org-noor' },
+];
+
+/** Care teams. Authority is only "verified" where a coordinator checked evidence (synthetic). */
+const teams: { r: string; u: string; rel: string; authority?: 'self' | 'guardian'; evidence?: string; domains?: Domain[]; basis: Consent['basis']; by: string; consentEvidence?: string }[] = [
+  { r: 'r-fatima', u: 'u-mariam', rel: 'Daughter', authority: 'guardian', evidence: 'Lasting power of attorney checked by the coordinator (synthetic)', basis: 'guardian', by: 'u-mariam' },
+  { r: 'r-fatima', u: 'u-aisha', rel: 'Home care nurse', basis: 'guardian', by: 'u-mariam' },
+  { r: 'r-fatima', u: 'u-kareem', rel: 'Geriatrician', basis: 'guardian', by: 'u-mariam' },
+  { r: 'r-hamad', u: 'u-khalid', rel: 'Son', basis: 'recorded', by: 'u-sara', consentEvidence: 'Hamad gave verbal consent at intake, witnessed and recorded by Sara (synthetic)' },
+  { r: 'r-hamad', u: 'u-joseph', rel: 'Care assistant', basis: 'recorded', by: 'u-sara', consentEvidence: 'Hamad gave verbal consent at intake, witnessed and recorded by Sara (synthetic)' },
+  { r: 'r-hamad', u: 'u-kareem', rel: 'Geriatrician', basis: 'recorded', by: 'u-sara', consentEvidence: 'Hamad gave verbal consent at intake, witnessed and recorded by Sara (synthetic)' },
+  { r: 'r-khadija', u: 'u-khadija', rel: 'Self', authority: 'self', evidence: 'Her own account', basis: 'self', by: 'u-khadija' },
+  { r: 'r-khadija', u: 'u-aisha', rel: 'Home care nurse', basis: 'self', by: 'u-khadija' },
+  { r: 'r-khadija', u: 'u-layla', rel: 'Family physician', basis: 'self', by: 'u-khadija' },
+  { r: 'r-khadija', u: 'u-faisal', rel: 'Physiotherapist', basis: 'self', by: 'u-khadija' },
+  { r: 'r-rashid', u: 'u-huda', rel: 'Mother', authority: 'guardian', evidence: 'Birth certificate and family book checked by the coordinator (synthetic)', domains: ['overview', 'medical', 'wellbeing', 'academic', 'social', 'activity', 'rehab', 'team'], basis: 'guardian', by: 'u-huda' },
+  { r: 'r-rashid', u: 'u-grace', rel: 'Class teacher', basis: 'guardian', by: 'u-huda' },
+  { r: 'r-rashid', u: 'u-salma', rel: 'Psychologist', basis: 'guardian', by: 'u-huda' },
+  { r: 'r-rashid', u: 'u-faisal', rel: 'Physiotherapist', basis: 'guardian', by: 'u-huda' },
+  { r: 'r-rashid', u: 'u-layla', rel: 'Family physician', basis: 'guardian', by: 'u-huda' },
 ];
 
 const rules: Rule[] = [
@@ -29,6 +59,9 @@ const rules: Rule[] = [
   { id: 'rule-benefits', name: 'Benefits & documents', category: 'benefits', role: 'social', enabled: true, priorityFloor: null, keywords: ['benefit', 'thiqa', 'insurance', 'emirates id', 'document', 'application', 'allowance', 'pension', 'paperwork', 'renewal', 'expired', 'expiring', 'card', 'ثقه', 'تامين', 'الهويه', 'هويه', 'وثيقه', 'وثائق', 'مستند', 'طلب', 'معاش', 'بدل', 'اوراق', 'تجديد', 'منتهي', 'انتهت', 'تنتهي', 'بطاقه'] },
   { id: 'rule-equipment', name: 'Equipment & home', category: 'equipment', role: 'social', enabled: true, priorityFloor: null, keywords: ['wheelchair repair', 'broken wheelchair', 'walker', 'hospital bed', 'grab bar', 'ramp', 'hearing aid', 'oxygen', 'commode', 'equipment', 'broken', 'air conditioning', 'ac not working', 'كرسي متحرك معطل', 'اصلاح الكرسي', 'مشايه', 'سرير طبي', 'مقبض', 'منحدر', 'سماعه', 'اكسجين', 'معدات', 'معطل', 'معطله', 'مكسور', 'خربان', 'مكيف', 'التكييف'] },
   { id: 'rule-wellbeing', name: 'Wellbeing', category: 'wellbeing', role: 'social', enabled: true, priorityFloor: null, keywords: ['lonely', 'loneliness', 'isolated', 'sad', 'low mood', 'anxious', 'bored', 'companionship', 'visit', 'mood', 'not sleeping', 'وحده', 'وحيد', 'وحيده', 'عزله', 'حزين', 'حزينه', 'حزن', 'احباط', 'مزاج', 'قلق', 'ملل', 'زياره', 'لا ينام', 'لا تنام', 'مؤانسه'] },
+  { id: 'rule-learning', name: 'School & learning', category: 'learning', role: 'educator', enabled: true, priorityFloor: null, keywords: ['school', 'teacher', 'homework', 'class', 'lesson', 'exam', 'iep', 'learning support', 'مدرسه', 'المدرسه', 'معلم', 'المعلم', 'معلمه', 'واجب', 'الواجب', 'الصف', 'حصه', 'امتحان'] },
+  { id: 'rule-rehab', name: 'Physio & rehab', category: 'rehab', role: 'physio', enabled: true, priorityFloor: null, keywords: ['physiotherapy', 'physio session', 'physio exercises', 'rehab', 'rehabilitation', 'home exercises', 'exercise plan', 'walking frame', 'علاج طبيعي', 'العلاج الطبيعي', 'جلسه العلاج الطبيعي', 'تمارين التاهيل', 'تاهيل', 'اطار المشي'] },
+  { id: 'rule-therapy', name: 'Therapy & emotional support', category: 'wellbeing', role: 'psychologist', enabled: true, priorityFloor: null, keywords: ['therapy', 'therapist', 'psychologist', 'counselling', 'counseling', 'panic', 'meltdown', 'coping', 'نوبه هلع', 'اخصائي نفسي', 'علاج نفسي', 'جلسه نفسيه', 'انهيار'] },
   { id: 'rule-scheduling', name: 'Appointments', category: 'scheduling', role: 'doctor', enabled: true, priorityFloor: null, keywords: ['appointment', 'reschedule', 'booking', 'follow-up', 'follow up', 'clinic', 'consultation', 'check-up', 'checkup', 'referral', 'موعد', 'تاجيل', 'اعاده جدوله', 'حجز', 'متابعه', 'عياده', 'استشاره', 'فحص', 'تحويل'] },
 ];
 
@@ -118,24 +151,143 @@ const script: Step[] = [
   { at: 0.2, by: 'u-mariam', label: 'ride', action: { type: 'create_challenge', title: 'Ride to Thursday eye appointment', description: 'Pickup from Al Barsha at 9:30 for the 10:30 clinic visit.', recipientId: 'r-fatima', priority: 'medium' } },
 ];
 
+/** The most recent `count` occurrences of a daily time that are at least an hour in the past. */
+function pastSlots(now: number, time: string, count: number): { slot: string; hoursAgo: number }[] {
+  const out: { slot: string; hoursAgo: number }[] = [];
+  for (let d = 0; out.length < count && d < 10; d++) {
+    const day = dayKey(now - d * 24 * H);
+    const [y, mo, dd] = day.split('-').map(Number);
+    const [h, mi] = time.split(':').map(Number);
+    const at = new Date(y, mo - 1, dd, h, mi).getTime();
+    if (at <= now - H) out.push({ slot: `${day} ${time}`, hoursAgo: (now - at) / H });
+  }
+  return out;
+}
+
+const rec = (at: number, by: string, recipientId: string, domain: Domain, kind: string, title: string, body = '', value?: number, unit?: string): Step => ({
+  at,
+  by,
+  action: { type: 'add_record', recipientId, domain, kind, title, body, value: value ?? null, unit, observedAt: undefined },
+});
+
+/** Profile records, medicines and dose logs, written through the engine by the people who would write them. */
+function careScript(now: number): Step[] {
+  const steps: Step[] = [
+    // Fatima — medical
+    rec(400, 'u-kareem', 'r-fatima', 'medical', 'condition', 'Type 2 diabetes', 'Diagnosed in 2015. Managed with metformin and evening insulin.'),
+    rec(390, 'u-mariam', 'r-fatima', 'medical', 'allergy', 'Penicillin', 'Rash and itching (reported by family).'),
+    rec(380, 'u-mariam', 'r-fatima', 'medical', 'provider', 'Dr. Kareem Hassan — Al Barsha Health Centre', 'Geriatrician. Clinic phone number is on the appointment card.'),
+    rec(72, 'u-aisha', 'r-fatima', 'medical', 'measurement', 'Blood glucose (fasting)', '', 7.9, 'mmol/L'),
+    rec(48, 'u-aisha', 'r-fatima', 'medical', 'measurement', 'Blood glucose (fasting)', '', 8.4, 'mmol/L'),
+    rec(20, 'u-aisha', 'r-fatima', 'medical', 'measurement', 'Blood glucose (evening)', '', 14, 'mmol/L'),
+    rec(7, 'u-aisha', 'r-fatima', 'medical', 'measurement', 'Blood glucose (fasting)', '', 15.1, 'mmol/L'),
+    rec(6.2, 'u-aisha', 'r-fatima', 'medical', 'observation', 'Felt dizzy after lunch', 'Sat down for 20 minutes, then felt better.'),
+    rec(30, 'u-mariam', 'r-fatima', 'wellbeing', 'checkin', 'Quiet but content', 'Enjoyed the majlis visit.', 3),
+    { at: 200, by: 'u-kareem', label: 'met', action: { type: 'add_medication', recipientId: 'r-fatima', med: { name: 'Metformin', strength: '500 mg', dose: '1 tablet', route: 'By mouth', times: ['08:00', '20:00'], prescriber: 'Dr. Kareem Hassan', instructions: 'Take with food.', reminders: true, onHand: 30, perDose: 1, active: true } } },
+    { at: 199, by: 'u-kareem', label: 'ins', action: { type: 'add_medication', recipientId: 'r-fatima', med: { name: 'Insulin glargine', strength: '100 units/mL pen', dose: '10 units', route: 'Injection under the skin', times: ['21:00'], prescriber: 'Dr. Kareem Hassan', instructions: 'Same time every evening. Rotate injection sites.', reminders: true, onHand: 600, perDose: 10, active: true } } },
+    // Hamad
+    rec(500, 'u-kareem', 'r-hamad', 'medical', 'condition', 'Chronic kidney disease (dialysis)', 'Haemodialysis on Sunday, Tuesday and Thursday at 9:00.'),
+    rec(50, 'u-joseph', 'r-hamad', 'medical', 'measurement', 'Weight before dialysis', '', 72.4, 'kg'),
+    rec(26, 'u-joseph', 'r-hamad', 'medical', 'measurement', 'Weight before dialysis', '', 73.1, 'kg'),
+    rec(300, 'u-khalid', 'r-hamad', 'activity', 'preference', 'Short walks in the garden with support'),
+    rec(24, 'u-khalid', 'r-hamad', 'wellbeing', 'checkin', 'Good spirits', 'Talked about his grandchildren all afternoon.', 4),
+    { at: 450, by: 'u-kareem', action: { type: 'add_medication', recipientId: 'r-hamad', med: { name: 'Calcium acetate', strength: '667 mg', dose: '1 capsule', route: 'By mouth', times: ['08:00', '13:00', '19:00'], prescriber: 'Dr. Kareem Hassan', instructions: 'With meals.', reminders: true, onHand: 200, perDose: 1, active: true } } },
+    // Khadija
+    rec(600, 'u-layla', 'r-khadija', 'medical', 'history', 'Right knee replacement', 'Operated at Qusais Clinic in September 2026.'),
+    rec(598, 'u-layla', 'r-khadija', 'medical', 'allergy', 'No known allergies', 'Confirmed at the pre-surgery check.'),
+    rec(300, 'u-faisal', 'r-khadija', 'rehab', 'rehab_plan', 'Knee rehabilitation — weeks 4 to 8', 'Goal: walk 500 m without a stick and climb stairs with one rail. Review every 2 weeks.'),
+    rec(299.9, 'u-faisal', 'r-khadija', 'rehab', 'exercise', 'Straight-leg raises', '3 sets of 10, twice a day. Stop if there is sharp pain.'),
+    rec(299.8, 'u-faisal', 'r-khadija', 'rehab', 'exercise', 'Heel slides', '3 sets of 10, twice a day.'),
+    rec(299.7, 'u-faisal', 'r-khadija', 'rehab', 'restriction', 'No kneeling or deep squats', 'Until the 12-week review.'),
+    rec(120, 'u-khadija', 'r-khadija', 'rehab', 'pain', 'Pain after exercises', '', 5),
+    rec(72, 'u-khadija', 'r-khadija', 'rehab', 'pain', 'Pain after exercises', '', 4),
+    rec(48, 'u-faisal', 'r-khadija', 'rehab', 'milestone', 'Walked to the corner shop with a stick'),
+    rec(30, 'u-khadija', 'r-khadija', 'rehab', 'completion', 'Straight-leg raises and heel slides', 'Morning set done.'),
+    rec(29, 'u-khadija', 'r-khadija', 'rehab', 'pain', 'Pain after exercises', '', 4),
+    rec(6, 'u-khadija', 'r-khadija', 'rehab', 'pain', 'Pain after exercises', '', 3),
+    rec(3, 'u-khadija', 'r-khadija', 'wellbeing', 'checkin', 'Feeling low', 'I don’t feel like going out since the operation.', 2),
+    rec(2.8, 'u-khadija', 'r-khadija', 'wellbeing', 'support', 'What helps me', 'A phone call from my sister in the evening. I don’t like surprise visits.'),
+    { at: 160, by: 'u-layla', action: { type: 'add_medication', recipientId: 'r-khadija', med: { name: 'Paracetamol', strength: '500 mg', dose: '2 tablets', route: 'By mouth', times: ['08:00', '20:00'], prescriber: 'Dr. Layla Haddad', instructions: 'For knee pain. No more than 8 tablets in 24 hours.', reminders: true, onHand: 40, perDose: 2, active: true } } },
+    // Rashid
+    rec(700, 'u-layla', 'r-rashid', 'medical', 'condition', 'Mild spastic diplegia (cerebral palsy)', 'Uses a walking frame for longer distances.'),
+    rec(690, 'u-huda', 'r-rashid', 'medical', 'allergy', 'No known allergies'),
+    rec(650, 'u-grace', 'r-rashid', 'academic', 'school', 'Al Mizhar Primary School — Grade 5'),
+    rec(640, 'u-grace', 'r-rashid', 'academic', 'iep', 'Individual education plan 2026–27', 'Extra time in tests, speech-to-text for long writing, a seat near the door.'),
+    rec(639, 'u-grace', 'r-rashid', 'academic', 'accommodation', 'Lift pass and early release between lessons'),
+    rec(630, 'u-grace', 'r-rashid', 'academic', 'learning_goal', 'Write a one-page report using speech-to-text'),
+    rec(600, 'u-grace', 'r-rashid', 'academic', 'attendance', 'Attendance, first half-term', '', 91),
+    rec(200, 'u-grace', 'r-rashid', 'academic', 'assessment', 'Reading — meeting the grade level'),
+    rec(100, 'u-grace', 'r-rashid', 'academic', 'attendance', 'Attendance, second half-term', '', 94),
+    rec(50, 'u-grace', 'r-rashid', 'academic', 'teacher_note', 'Led his group in the robotics lesson'),
+    rec(620, 'u-huda', 'r-rashid', 'social', 'social_goal', 'Join the robotics club at lunchtime', 'His own choice. Two lunchtimes a week is enough for him.'),
+    rec(26, 'u-grace', 'r-rashid', 'social', 'participation', 'Robotics club'),
+    rec(10, 'u-huda', 'r-rashid', 'social', 'achievement', 'Presented his robot at the school fair'),
+    rec(80, 'u-huda', 'r-rashid', 'wellbeing', 'behaviour', 'Upset when the timetable changed without warning', 'Calmed down with his visual schedule.'),
+    rec(9, 'u-huda', 'r-rashid', 'wellbeing', 'checkin', 'Happy after the fair', '', 4),
+    rec(500, 'u-salma', 'r-rashid', 'wellbeing', 'session', 'Sessions: Mondays at 16:00, Mind Well Clinic'),
+    rec(499, 'u-salma', 'r-rashid', 'wellbeing', 'goal', 'Use coping cards when plans change'),
+    rec(60, 'u-salma', 'r-rashid', 'wellbeing_notes', 'progress_note', 'Session 6', 'Practised the coping cards for transitions. He says he used them twice at school this week. Continue weekly.'),
+    rec(400, 'u-faisal', 'r-rashid', 'rehab', 'rehab_plan', 'Lower-limb strengthening', 'Twice-weekly sessions and a 15-minute home programme each day.'),
+    rec(399, 'u-faisal', 'r-rashid', 'rehab', 'exercise', 'Sit-to-stand', '2 sets of 8 from a chair, slow and controlled.'),
+    rec(380, 'u-huda', 'r-rashid', 'activity', 'preference', 'Swimming and wheelchair basketball'),
+    rec(30, 'u-huda', 'r-rashid', 'activity', 'activity_log', 'Swimming', '', 45),
+    // A request waiting for Mariam's decision (approval centre demo).
+    { at: 2, by: 'u-sara', action: { type: 'invite_member', recipientId: 'r-fatima', email: 'nadia@rahma.ae', role: 'caregiver', relationship: 'Weekend relief carer', domains: ['overview', 'medical'], accessDays: 30 } },
+  ];
+  // Dose logs for Fatima's metformin: earlier doses taken, the latest one missed (matches the reported problem).
+  const slots = [...pastSlots(now, '08:00', 2), ...pastSlots(now, '20:00', 2)].sort((a, b) => b.hoursAgo - a.hoursAgo);
+  slots.forEach((x, i) => {
+    const last = i === slots.length - 1;
+    steps.push({ at: Math.max(0.05, x.hoursAgo - 0.5), by: last ? 'u-mariam' : 'u-aisha', action: (ids) => ({ type: 'log_dose', medicationId: ids.met, slot: x.slot, status: last ? 'missed' : 'taken', note: last ? 'Noticed at lunchtime.' : '' }) });
+  });
+  return steps;
+}
+
 export function createSeed(now = Date.now()): State {
   let state: State = {
     version: 1,
     seq: 100,
     users: JSON.parse(JSON.stringify(users)),
     recipients: [
-      { id: 'r-fatima', name: 'Fatima Al Noor', age: 72, area: 'Al Barsha, Dubai', note: 'Lives with her daughter Mariam. Type 2 diabetes, uses a walker.', support: 'assisted', living: 'family', needs: ['chronic', 'mobility'] },
-      { id: 'r-hamad', name: 'Hamad Al Mansoori', age: 80, area: 'Mirdif, Dubai', note: 'Wheelchair user, dialysis three times a week. Son Khalid visits daily.', support: 'high', living: 'family', needs: ['mobility', 'renal'] },
-      { id: 'r-khadija', name: 'Khadija Saeed', age: 68, area: 'Al Qusais, Dubai', note: 'Recovering from knee surgery. Lives alone.', support: 'assisted', living: 'alone', needs: ['recovery', 'mobility'] },
+      { id: 'r-fatima', name: 'Fatima Al Noor', age: 72, area: 'Al Barsha, Dubai', note: 'Lives with her daughter Mariam. Type 2 diabetes, uses a walker.', support: 'assisted', living: 'family', needs: ['chronic', 'mobility'], orgId: 'org-hub', preferredName: 'Umm Mariam', communication: 'Arabic only. Prefers phone calls in the morning; speak slowly and clearly.', languages: ['Arabic'], hidden: ['academic'], accessVersion: 1, updatedAt: now - 300 * H },
+      { id: 'r-hamad', name: 'Hamad Al Mansoori', age: 80, area: 'Mirdif, Dubai', note: 'Wheelchair user, dialysis three times a week. Son Khalid visits daily.', support: 'high', living: 'family', needs: ['mobility', 'renal'], orgId: 'org-hub', preferredName: 'Abu Khalid', communication: 'Arabic. Hard of hearing on the left — sit on his right side.', languages: ['Arabic'], hidden: ['academic'], accessVersion: 1, updatedAt: now - 300 * H },
+      { id: 'r-khadija', name: 'Khadija Saeed', age: 68, area: 'Al Qusais, Dubai', note: 'Recovering from knee surgery. Lives alone.', support: 'assisted', living: 'alone', needs: ['recovery', 'mobility'], orgId: 'org-hub', preferredName: 'Khadija', communication: 'Arabic or English. Text messages are best; no calls after 9 pm.', languages: ['Arabic', 'English'], hidden: ['academic'], accessVersion: 1, updatedAt: now - 300 * H },
+      { id: 'r-rashid', name: 'Rashid Al Hammadi', age: 11, area: 'Mizhar, Dubai', note: 'Person of Determination. Mild cerebral palsy; uses a walking frame for longer distances. Loves robotics.', support: 'assisted', living: 'family', needs: ['mobility'], orgId: 'org-hub', preferredName: 'Rashid', communication: 'Short, clear sentences. Give him time to answer — he may type replies on his tablet.', languages: ['Arabic', 'English'], hidden: [], accessVersion: 1, updatedAt: now - 300 * H },
+      { id: 'r-maitha', name: 'Maitha Obaid', age: 77, area: 'Al Khan, Sharjah', note: 'Lives with her son. Uses a hearing aid.', support: 'independent', living: 'family', needs: ['sensory'], orgId: 'org-noor', preferredName: 'Maitha', communication: 'Arabic. Face her when speaking.', languages: ['Arabic'], hidden: ['academic'], accessVersion: 1, updatedAt: now - 300 * H },
     ],
     challenges: [],
     rules: JSON.parse(JSON.stringify(rules)),
     playbooks: playbookDefs.map((p) => ({ ...p, steps: [...p.steps], tags: [...p.tags], updatedAt: now - 400 * H })),
     notifications: [],
     settings: { sla: { urgent: 60, high: 240, medium: 1440, low: 4320 }, autoEscalate: true, balanceLoad: true, preferContinuity: true },
+    schema: 2,
+    orgs: [
+      { id: 'org-hub', name: 'SANAD Care Hub' },
+      { id: 'org-noor', name: 'Noor Community Care' },
+    ],
+    memberships: [],
+    invites: [],
+    consents: [],
+    approvals: [],
+    audit: [],
+    records: [],
+    medications: [],
+    doseLogs: [],
   };
+  state.users.find((u) => u.id === 'u-sara')!.orgId = 'org-hub';
+  let seq = 0;
+  const since = now - 800 * H;
+  for (const t of teams) {
+    const u = state.users.find((x) => x.id === t.u)!;
+    const domains = t.domains ?? (t.authority ? (['overview', 'medical', 'wellbeing', 'academic', 'social', 'activity', 'rehab', 'team'] as Domain[]) : ROLE_DOMAINS[u.role]);
+    seq += 1;
+    const m: Membership = { id: `g-${seq}`, recipientId: t.r, userId: t.u, relationship: t.rel, authority: t.authority ?? 'none', authorityVerified: !!t.authority, authorityEvidence: t.evidence, domains, status: 'active', grantedBy: t.by, createdAt: since + seq * 1000 };
+    state.memberships.push(m);
+    state.consents.push({ id: `k-${seq}`, recipientId: t.r, subjectId: t.u, change: 'grant', domains, basis: t.basis, givenBy: t.by, evidence: t.consentEvidence, at: m.createdAt });
+  }
+  syncLinks(state, now);
   const ids: Record<string, string> = {};
-  for (const step of [...script].sort((a, b) => b.at - a.at)) {
+  for (const step of [...script, ...careScript(now)].sort((a, b) => b.at - a.at)) {
     let action = typeof step.action === 'function' ? step.action(ids) : step.action;
     if (action.type === 'toggle_check' && action.itemId === '__first') {
       const c = state.challenges.find((x) => x.id === (action as { id: string }).id);

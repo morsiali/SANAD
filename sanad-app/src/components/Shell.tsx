@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { ROLE_LABEL } from '../../shared/types';
+import { ROLE_LABEL, isHousehold } from '../../shared/types';
 import { isActive } from '../../shared/routing';
 import { useApp } from '../lib/store';
 import { t } from '../lib/i18n';
@@ -52,20 +52,25 @@ function Frame() {
 
   const unread = view.notifications.filter((n) => !n.read).length;
   const mine = view.challenges.filter((c) => c.assigneeId === me.id && isActive(c)).length;
-  const toConfirm = view.challenges.filter((c) => c.stage === 'resolved' && (c.reporterId === me.id || (me.role === 'family' && me.recipients.includes(c.recipientId)))).length;
+  const toConfirm = view.challenges.filter((c) => c.stage === 'resolved' && (c.reporterId === me.id || (isHousehold(me.role) && me.recipients.includes(c.recipientId)))).length;
+  const approvalsForMe = view.approvals.filter((a) => a.status === 'pending' && a.approverIds.includes(me.id) && a.expiresAt >= Date.now()).length + view.invites.filter((i) => i.status === 'pending' && i.email === me.email.toLowerCase() && i.expiresAt > Date.now()).length;
+  const isAdmin = me.role === 'admin';
   const triage = me.role === 'coordinator' ? view.challenges.filter((c) => isActive(c) && (c.escalated || c.stage === 'reported' || !c.assigneeId)).length : 0;
 
+  const peopleLabel = me.role === 'self' ? 'My care' : isHousehold(me.role) ? 'My family' : 'People we care for';
   const items = [
     { to: '/app', icon: 'home', label: 'Dashboard', end: true },
-    { to: '/app/challenges', icon: 'layers', label: 'Challenges', badge: mine + toConfirm + triage || undefined },
-    { to: '/app/report', icon: 'plus', label: 'Report a challenge' },
+    { to: '/app/people', icon: 'heart', label: peopleLabel },
+    ...(isAdmin ? [] : [{ to: '/app/challenges', icon: 'layers', label: 'Challenges', badge: mine + toConfirm + triage || undefined }]),
+    ...(isAdmin ? [] : [{ to: '/app/report', icon: 'plus', label: 'Report a challenge' }]),
+    { to: '/app/approvals', icon: 'shield', label: 'Approvals', badge: approvalsForMe || undefined },
     { to: '/app/workflow', icon: 'map', label: 'How SANAD works' },
-    { to: '/app/intelligence', icon: 'sparkle', label: 'Ask SANAD' },
-    { to: '/app/playbooks', icon: 'book', label: 'Playbooks' },
+    ...(isAdmin ? [] : [{ to: '/app/intelligence', icon: 'sparkle', label: 'Ask SANAD' }]),
+    ...(isAdmin ? [] : [{ to: '/app/playbooks', icon: 'book', label: 'Playbooks' }]),
     { to: '/app/inbox', icon: 'inbox', label: 'Inbox', badge: unread || undefined },
-    { to: '/app/team', icon: 'users', label: me.role === 'family' ? 'Care team' : 'Team & people' },
-    { to: '/app/routing', icon: 'route', label: me.role === 'coordinator' ? 'Routing rules' : 'How routing works' },
-    { to: '/app/analytics', icon: 'chart', label: 'Insights' },
+    { to: '/app/team', icon: 'users', label: isHousehold(me.role) ? 'Care team' : 'Team' },
+    ...(isAdmin ? [] : [{ to: '/app/routing', icon: 'route', label: me.role === 'coordinator' ? 'Routing rules' : 'How routing works' }]),
+    ...(isAdmin ? [] : [{ to: '/app/analytics', icon: 'chart', label: 'Insights' }]),
     { to: '/app/settings', icon: 'settings', label: 'Settings' },
   ];
 
@@ -94,7 +99,7 @@ function Frame() {
           <Avatar user={me} size={38} />
           <span>
             <strong>{me.name}</strong>
-            <small>{me.role === 'family' ? me.title : `${ROLE_LABEL[me.role]} · ${me.org}`}</small>
+            <small>{isHousehold(me.role) ? me.title : `${ROLE_LABEL[me.role]} · ${me.org}`}</small>
           </span>
         </div>
         <nav className="side-nav">
@@ -106,7 +111,7 @@ function Frame() {
             </NavLink>
           ))}
         </nav>
-        {me.role !== 'family' && (
+        {!isHousehold(me.role) && !isAdmin && (
         <div className="side-foot">
           <span className={`presence ${me.available ? 'presence-on' : ''}`}>
             <i />
@@ -128,10 +133,12 @@ function Frame() {
             <kbd>Enter</kbd>
           </form>
           <div className="top-right">
-            <Link to="/app/report" className="btn btn-dark btn-sm top-report">
-              <Icon name="plus" size={16} />
-              <span>Report</span>
-            </Link>
+            {!isAdmin && (
+              <Link to="/app/report" className="btn btn-dark btn-sm top-report">
+                <Icon name="plus" size={16} />
+                <span>Report</span>
+              </Link>
+            )}
             <LangToggle />
             <Link to="/app/inbox" className="icon-btn bell" aria-label={t('Inbox, {n} unread', { n: unread })}>
               <Icon name="bell" />

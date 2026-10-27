@@ -117,6 +117,8 @@ export function matchRules(rules: Rule[], title: string, description: string): R
   return out.sort((a, b) => b.score - a.score || a.rule.name.localeCompare(b.rule.name));
 }
 
+const TEAM_ONLY: Role[] = ['family', 'self', 'psychologist', 'physio', 'educator'];
+
 export interface AssigneePick {
   user: User | null;
   reasons: string[];
@@ -132,10 +134,14 @@ export function selectAssignee(
   text: string,
   settings: Pick<Settings, 'balanceLoad' | 'preferContinuity'>,
   exclude: string[] = [],
+  orgId?: string,
 ): AssigneePick {
   const norm = normalize(text);
   let pool = users.filter((u) => u.role === role && !exclude.includes(u.id));
-  if (role === 'family') pool = pool.filter((u) => u.recipients.includes(recipientId));
+  // Therapists, teachers and family only receive problems about people whose care team they are on.
+  if (TEAM_ONLY.includes(role)) pool = pool.filter((u) => u.recipients.includes(recipientId));
+  // Coordinators only handle people in their own organisation.
+  if ((role === 'coordinator' || role === 'admin') && orgId) pool = pool.filter((u) => !u.orgId || u.orgId === orgId);
   const available = pool.filter((u) => u.available);
   if (available.length === 0) {
     const m = msg(pool.length === 0 ? 'r_none_setup' : 'r_none_available', { role });
@@ -241,7 +247,7 @@ export function decideRouting(
     }
   }
 
-  const pick = selectAssignee(ctx.users, ctx.loads, role, input.recipientId, text, ctx.settings);
+  const pick = selectAssignee(ctx.users, ctx.loads, role, input.recipientId, text, ctx.settings, [], person?.orgId);
   why.push(...pick.why);
 
   return {

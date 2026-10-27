@@ -45,6 +45,11 @@ export function recipientName(view: View, id: string): string {
 }
 
 export const ROLE_ICON: Record<Role, string> = {
+  self: 'user',
+  psychologist: 'brain',
+  physio: 'walk',
+  educator: 'book',
+  admin: 'shield',
   family: 'home',
   caregiver: 'heart',
   doctor: 'stethoscope',

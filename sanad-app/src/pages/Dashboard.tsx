@@ -1,6 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ROLE_LABEL, STAGES, STAGE_LABEL, type Challenge } from '../../shared/types';
+import { ROLE_LABEL, STAGES, STAGE_LABEL, isHousehold, type Challenge } from '../../shared/types';
+import { alertsFor, myPeople, nextDose } from '../lib/people';
+import { isOrgStaff } from '../../shared/access';
 import { isActive } from '../../shared/routing';
 import { nextActions, type NextAction } from '../../shared/intelligence';
 import { metrics } from '../../shared/analytics';
@@ -21,12 +23,14 @@ export function Dashboard() {
   const actions = useMemo(() => nextActions(view, now), [view, now]);
   const cfg = ROLE_CONFIG[me.role];
   const isCoord = me.role === 'coordinator';
-  const isFamily = me.role === 'family';
+  const isFamily = isHousehold(me.role);
   const mine = view.challenges.filter((c) => (isFamily ? me.recipients.includes(c.recipientId) : isCoord ? true : c.assigneeId === me.id || c.reporterId === me.id));
   const m = metrics(mine, now);
   const top = actions[0];
 
-  const subline = isFamily
+  const subline = me.role === 'self'
+    ? t('Here’s your care at a glance.')
+    : isFamily
     ? t(me.recipients.length > 1 ? 'Here’s how {names} are doing today.' : 'Here’s how {names} is doing today.', {
         names: me.recipients.map((r) => recipientName(view, r).split(' ')[0]).join(` ${t('and')} `),
       })
@@ -39,7 +43,19 @@ export function Dashboard() {
     nav(`/app/intelligence${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
   };
 
-  const tiles = isCoord
+  const isAdmin = me.role === 'admin';
+  const pendingForMe = view.approvals.filter((a) => a.status === 'pending' && a.approverIds.includes(me.id) && a.expiresAt >= now).length;
+  const invitesForMe = view.invites.filter((i) => i.status === 'pending' && i.email === me.email.toLowerCase() && i.expiresAt > now).length;
+  const orgPeople = myPeople(view);
+  const unverified = view.memberships.filter((x) => x.status === 'active' && x.authority !== 'none' && !x.authorityVerified && orgPeople.some((r) => r.id === x.recipientId)).length;
+  const tiles = isAdmin
+    ? [
+        { label: 'People in your organisation', value: orgPeople.length, to: '/app/people' },
+        { label: 'Authority waiting to be verified', value: unverified, to: '/app/people', alert: unverified > 0 },
+        { label: 'Invitations waiting', value: view.invites.filter((i) => i.status === 'pending' && i.expiresAt > now).length, to: '/app/people' },
+        { label: 'Access requests waiting', value: view.approvals.filter((a) => a.status === 'pending').length, to: '/app/approvals' },
+      ]
+    : isCoord
     ? [
         { label: 'Open across the network', value: m.open, to: '/app/challenges?scope=all' },
         { label: 'Waiting for triage', value: view.challenges.filter((c) => isActive(c) && (c.stage === 'reported' || !c.assigneeId)).length, to: '/app/challenges?stage=reported' },
@@ -107,13 +123,29 @@ export function Dashboard() {
             <>
               <strong className="spot-title">You’re all caught up</strong>
               <p className="spot-why">New challenges routed to you will appear here first.</p>
-              <Link className="btn btn-dark" to="/app/report">
-                Report a challenge
-              </Link>
+              {isAdmin ? (
+                <Link className="btn btn-dark" to="/app/people">
+                  {t('Review care teams')}
+                </Link>
+              ) : (
+                <Link className="btn btn-dark" to="/app/report">
+                  Report a challenge
+                </Link>
+              )}
             </>
           )}
         </div>
       </section>
+
+      {(pendingForMe > 0 || invitesForMe > 0) && (
+        <Link to="/app/approvals" className="callout callout-warn">
+          <Icon name="shield" size={18} />
+          <span>
+            <strong>{t(pendingForMe ? (pendingForMe === 1 ? '1 request needs your approval' : '{n} requests need your approval') : invitesForMe === 1 ? 'You have 1 invitation to a care team' : 'You have {n} invitations to care teams', { n: pendingForMe || invitesForMe })}</strong>
+            <small>{t('Nothing changes until you decide.')}</small>
+          </span>
+        </Link>
+      )}
 
       <section className="tiles" aria-label="Key numbers">
         {tiles.map((t) => (
@@ -157,7 +189,7 @@ export function Dashboard() {
         </section>
 
         <aside className="stack">
-          {isFamily && <PeoplePanel />}
+          {!isOrgStaff(me) && myPeople(view).length > 0 && <PeoplePanel />}
           {isCoord && <TeamLoad />}
           {!isFamily && !isCoord && <Pulse items={view.challenges.filter((c) => c.assigneeId === me.id)} />}
           <section className="panel">
@@ -219,24 +251,38 @@ function QueueRow({ a }: { a: NextAction }) {
 }
 
 function PeoplePanel() {
-  const { view, me } = useSession();
+  const { view, me, now } = useSession();
   return (
     <section className="panel panel-tint">
       <header className="panel-head">
-        <h2>People you care for</h2>
+        <h2>{t(me.role === 'self' ? 'My care' : isHousehold(me.role) ? 'People you care for' : 'Your people')}</h2>
+        <Link to="/app/people" className="link small">
+          {t('See all')}
+        </Link>
       </header>
-      {me.recipients.map((rid) => {
-        const r = view.recipients.find((x) => x.id === rid);
-        if (!r) return null;
+      {myPeople(view).map((r) => {
+        const rid = r.id;
         const open = view.challenges.filter((c: Challenge) => c.recipientId === rid && isActive(c));
         const team = [...new Set(open.map((c) => c.assigneeId).filter(Boolean))] as string[];
+        const warn = alertsFor(view, r, now).filter((a) => a.tone === 'warn');
+        const next = nextDose(view, rid, now);
         return (
-          <Link key={rid} to={`/app/challenges?person=${rid}`} className="person">
+          <Link key={rid} to={`/app/people/${rid}`} className="person">
             <span className="person-ava">{r.name[0]}</span>
             <span className="person-body">
               <strong>{r.name}</strong>
               <small>{t('Age {age} · {area}', { age: r.age, area: tc(r.area) })}</small>
               <CareTags r={r} compact />
+              {warn.map((a) => (
+                <span key={a.key} className="person-alert">
+                  <Icon name="flag" size={12} /> {t(a.text, a.vars)}
+                </span>
+              ))}
+              {next && (
+                <span className="person-stats">
+                  {t('Next medicine: {med} at {time}', { med: tc(next.med.name), time: next.slot.slice(11) })}
+                </span>
+              )}
               <span className="person-stats">
                 {open.length ? t('{n} open · {h} high priority', { n: open.length, h: open.filter((c) => c.priority === 'urgent' || c.priority === 'high').length }) : t('No open challenges')}
               </span>

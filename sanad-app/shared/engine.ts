@@ -2,7 +2,10 @@
 import {
   EngineError,
   ROLE_LABEL,
+  isHousehold,
   type Action,
+  type Domain,
+  type Recipient,
   type Msg,
   type Challenge,
   type Notification,
@@ -16,15 +19,17 @@ import {
 import { computeLoads, decideRouting, isActive, selectAssignee } from './routing';
 import { en, msg } from './messages';
 import { cleanProfile, type ProfileInput } from './care';
+import { applyCare, audit, expireCare, linkMember, syncLinks, unlinkMember, type CareCtx } from './care-engine';
+import { AUTHORITY_DOMAINS, DOMAINS, ROLE_DOMAINS, canManageTeam, canWrite, domainsFor, isLive, isMinor, isOrgStaff } from './access';
 
-const fail = (k: string, p?: Record<string, string | number>, status = 400) => {
+export const fail = (k: string, p?: Record<string, string | number | Msg>, status = 400) => {
   const m = msg(k, p);
   return new EngineError(m, status, en(m));
 };
 
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
-function nextId(state: State, prefix: string): string {
+export function nextId(state: State, prefix: string): string {
   state.seq += 1;
   return `${prefix}${state.seq.toString(36)}`;
 }
@@ -50,14 +55,18 @@ export function userName(state: Pick<State, 'users'>, id: string | null | undefi
 export const isCoordinator = (u: User) => u.role === 'coordinator';
 
 export function isFamilyOf(u: User, c: Challenge): boolean {
-  return u.role === 'family' && u.recipients.includes(c.recipientId);
+  return isHousehold(u.role) && u.recipients.includes(c.recipientId);
 }
 
-export function canSee(u: User, c: Challenge): boolean {
-  if (isCoordinator(u)) return true;
+/** Coordinators see every problem in their own organisation (pass recipients to apply the organisation check). */
+export function canSee(u: User, c: Challenge, recipients?: Pick<Recipient, 'id' | 'orgId'>[]): boolean {
+  if (isCoordinator(u)) {
+    const org = recipients?.find((r) => r.id === c.recipientId)?.orgId;
+    if (!recipients || !org || !u.orgId || org === u.orgId) return true;
+  }
   if (c.reporterId === u.id || c.assigneeId === u.id || c.watchers.includes(u.id)) return true;
   if (u.recipients.includes(c.recipientId)) return true;
-  if (u.role !== 'family' && c.role === u.role) return true;
+  if (!isHousehold(u.role) && !isOrgStaff(u) && c.role === u.role) return true;
   return false;
 }
 
@@ -78,7 +87,7 @@ function log(state: State, c: Challenge, actorId: string, type: string, m: Msg, 
   c.updatedAt = now;
 }
 
-function notify(
+export function notify(
   state: State,
   userIds: (string | null | undefined)[],
   c: Challenge | null,
@@ -97,11 +106,11 @@ function notify(
   if (state.notifications.length > 600) state.notifications.length = 600;
 }
 
-const coordinators = (state: State) => state.users.filter(isCoordinator).map((u) => u.id);
+export const coordinators = (state: State) => state.users.filter(isCoordinator).map((u) => u.id);
 const familyOf = (state: State, c: Challenge) => state.users.filter((u) => isFamilyOf(u, c)).map((u) => u.id);
 const stakeholders = (state: State, c: Challenge) => [c.reporterId, c.assigneeId, ...c.watchers, ...familyOf(state, c)];
 
-function requireText(v: string | undefined, label: string, min = 3): string {
+export function requireText(v: string | undefined, label: string, min = 3): string {
   const t = (v ?? '').trim();
   if (t.length < min) throw fail('e_min', { label: `@${label}`, min });
   return t;
@@ -109,7 +118,7 @@ function requireText(v: string | undefined, label: string, min = 3): string {
 
 function assignTo(state: State, c: Challenge, role: Role, actorId: string, why: Msg, now: number, exclude: string[] = []) {
   const loads = computeLoads(state.users, state.challenges);
-  const pick = selectAssignee(state.users, loads, role, c.recipientId, `${c.title} ${c.description}`, state.settings, exclude);
+  const pick = selectAssignee(state.users, loads, role, c.recipientId, `${c.title} ${c.description}`, state.settings, exclude, state.recipients.find((r) => r.id === c.recipientId)?.orgId);
   c.role = role;
   c.assigneeId = pick.user?.id ?? null;
   c.stage = role === 'coordinator' && c.stage === 'reported' ? 'reported' : 'routed';
@@ -133,7 +142,7 @@ export interface ApplyResult {
 }
 
 /** Pure: returns a new state. Throws EngineError when the action is not allowed. */
-export function apply(prev: State, actorId: string, action: Action, now = Date.now()): ApplyResult {
+export function apply(prev: State, actorId: string, action: Action, now = Date.now(), ctx: CareCtx = {}): ApplyResult {
   const state = clone(prev);
   const me = getUser(state, actorId);
   let m: Msg = msg('m_saved');
@@ -142,7 +151,7 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
 
   const workOn = (id: string, check: (c: Challenge) => boolean, deny: string) => {
     const c = getChallenge(state, id);
-    if (!canSee(me, c)) throw fail('e_access', undefined, 403);
+    if (!canSee(me, c, state.recipients)) throw fail('e_access', undefined, 403);
     if (!check(c)) throw fail(deny, undefined, 403);
     return c;
   };
@@ -153,7 +162,8 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       const description = (action.description ?? '').trim();
       const recipient = state.recipients.find((r) => r.id === action.recipientId);
       if (!recipient) throw fail('e_who');
-      if (me.role === 'family' && !me.recipients.includes(recipient.id)) throw fail('e_family_only', undefined, 403);
+      if (isHousehold(me.role) && !me.recipients.includes(recipient.id)) throw fail('e_family_only', undefined, 403);
+      if (me.role === 'admin') throw fail('e_admin_report', undefined, 403);
       const decision = decideRouting(
         { title, description, recipientId: recipient.id, priority: action.priority, category: action.category },
         { users: state.users, rules: state.rules, settings: state.settings, loads: computeLoads(state.users, state.challenges), recipients: state.recipients },
@@ -507,13 +517,20 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
         color: PALETTE[state.users.length % PALETTE.length],
         available: true,
         skills: action.skills.map((s) => s.trim().toLowerCase()).filter(Boolean),
-        recipients: action.recipients.filter((r) => state.recipients.some((x) => x.id === r)),
+        recipients: [],
+        orgId: isOrgStaff({ role: action.role }) ? me.orgId ?? null : null,
       };
       state.users.push(u);
+      const notes: Msg[] = [];
+      for (const rid of action.recipients.filter((r) => state.recipients.some((x) => x.id === r && (!x.orgId || x.orgId === me.orgId)))) {
+        const note = linkMember(state, me, u, rid, now);
+        if (note) notes.push(note);
+      }
+      syncLinks(state, now);
       notify(state, [u.id], null, msg('n_welcome', { first: name.split(' ')[0], name: me.name, role: u.role }), 'system', now);
       pickUpQueue(state, now);
       createdId = u.id;
-      m = msg('m_added', { name });
+      m = notes.length ? msg('m_added_with', { name, note: notes[0] }) : msg('m_added', { name });
       break;
     }
 
@@ -523,9 +540,19 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       target.title = action.title.trim() || ROLE_LABEL[target.role];
       target.org = action.org.trim();
       target.skills = action.skills.map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 12);
-      target.recipients = action.recipients.filter((r) => state.recipients.some((x) => x.id === r));
+      const wanted = action.recipients.filter((r) => state.recipients.some((x) => x.id === r && (!x.orgId || x.orgId === me.orgId)));
+      const notes: Msg[] = [];
+      for (const rid of wanted) {
+        const note = linkMember(state, me, target, rid, now);
+        if (note) notes.push(note);
+      }
+      for (const rid of target.recipients.filter((r) => !wanted.includes(r))) {
+        const r = state.recipients.find((x) => x.id === rid);
+        if (!r?.orgId || r.orgId === me.orgId) unlinkMember(state, me, target.id, rid, now);
+      }
+      syncLinks(state, now);
       notify(state, [target.id], null, msg('n_profile_updated', { name: me.name }), 'system', now, me.id);
-      m = msg('m_user_updated', { name: target.name });
+      m = notes.length ? msg('m_user_updated_with', { name: target.name, note: notes[0] }) : msg('m_user_updated', { name: target.name });
       break;
     }
 
@@ -536,11 +563,13 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
       const id = nextId(state, 'r');
       const note = action.note.trim();
-      state.recipients.push({ id, name, age, area: action.area.trim(), note, ...cleanProfile(action, age, note) });
+      state.recipients.push({ id, name, age, area: action.area.trim(), note, ...cleanProfile(action, age, note), orgId: me.orgId ?? undefined, accessVersion: 1, updatedAt: now });
+      audit(state, me.id, id, 'overview', 'profile_created', msg('au_profile_created', { actor: me.name, name }), now, id);
       for (const fid of action.familyIds) {
-        const f = state.users.find((u) => u.id === fid);
-        if (f && !f.recipients.includes(id)) f.recipients.push(id);
+        const f = state.users.find((u) => u.id === fid && isHousehold(u.role));
+        if (f) linkMember(state, me, f, id, now);
       }
+      syncLinks(state, now);
       createdId = id;
       m = msg('m_added', { name });
       break;
@@ -549,7 +578,7 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
     case 'update_recipient': {
       const r = state.recipients.find((x) => x.id === action.recipientId);
       if (!r) throw fail('e_who');
-      if (!isCoordinator(me) && !(me.role === 'family' && me.recipients.includes(r.id))) throw fail('e_edit_recipient', undefined, 403);
+      if (!canWrite(state, me.id, r.id, 'overview', now)) throw fail('e_edit_recipient', undefined, 403);
       const age = Math.round(Number(action.age));
       if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
       r.age = age;
@@ -643,11 +672,14 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
     }
 
     default: {
-      const t = (action as { type: string }).type;
-      throw fail('e_unknown', { type: t });
+      const res = applyCare(state, me, action, now, ctx);
+      if (!res) throw fail('e_unknown', { type: (action as { type: string }).type });
+      m = res.m;
+      createdId = res.createdId;
     }
   }
 
+  syncLinks(state, now);
   state.version += 1;
   sweep(state, now);
   return { state, createdId, message: en(m), m };
@@ -667,7 +699,7 @@ function pickUpQueue(state: State, now: number): number {
 
 /** Time-based rules: SLA breaches escalate automatically. Mutates; returns true when something changed. */
 export function sweep(state: State, now = Date.now()): boolean {
-  let changed = false;
+  let changed = expireCare(state, now);
   if (state.settings.autoEscalate) {
     for (const c of state.challenges) {
       if (isActive(c) && !c.escalated && c.dueAt < now) {
@@ -683,15 +715,88 @@ export function sweep(state: State, now = Date.now()): boolean {
   return changed;
 }
 
-export function viewFor(state: State, userId: string): View {
+/**
+ * Everything a user receives is built here, field by field — never by copying the whole state —
+ * so information they may not see never leaves the server (or reaches the screen in browser mode).
+ */
+export function viewFor(state: State, userId: string, now = Date.now()): View {
   const me = getUser(state, userId);
+  const access: Record<string, Domain[]> = {};
+  for (const r of state.recipients) {
+    const d = domainsFor(state, userId, r.id, now);
+    if (d.length) access[r.id] = d;
+  }
+  const can = (rid: string, d: Domain) => !!access[rid]?.includes(d);
+  const challenges = state.challenges.filter((c) => canSee(me, c, state.recipients));
+  const named = new Set(challenges.map((c) => c.recipientId));
+  const recipients: Recipient[] = [];
+  for (const r of state.recipients) {
+    if (access[r.id]) recipients.push(r);
+    // Not on their team, but a problem about them reached this user: share the name and area only.
+    else if (named.has(r.id)) recipients.push({ id: r.id, name: r.name, age: r.age, area: r.area, note: '', limited: true });
+  }
+  const visible = new Set(recipients.filter((r) => !r.limited).map((r) => r.id));
+  const manages = (rid: string) => canManageTeam(state, userId, rid, now);
   return {
-    ...state,
+    version: state.version,
+    schema: state.schema,
+    seq: state.seq,
     me: userId,
-    challenges: state.challenges.filter((c) => canSee(me, c)),
+    users: state.users.map((u) => ({ ...u, recipients: u.recipients.filter((r) => visible.has(r)) })),
+    recipients,
+    challenges,
+    rules: state.rules,
+    playbooks: state.playbooks,
     notifications: state.notifications.filter((n) => n.userId === userId),
+    settings: state.settings,
+    orgs: state.orgs,
     loads: computeLoads(state.users, state.challenges),
+    access,
+    memberships: state.memberships
+      .filter((m) => m.userId === userId || can(m.recipientId, 'team'))
+      .map((m) => (can(m.recipientId, 'team') ? m : { ...m, authorityEvidence: undefined })),
+    invites: state.invites.filter((i) => (i.status === 'pending' && i.email === me.email.toLowerCase()) || manages(i.recipientId)),
+    consents: state.consents.filter((c) => can(c.recipientId, 'team')),
+    approvals: state.approvals.filter((a) => a.requestedBy === userId || a.approverIds.includes(userId) || manages(a.recipientId)),
+    audit: state.audit.filter((e) => (e.recipientId ? can(e.recipientId, e.domain) && (e.domain !== 'team' || can(e.recipientId, 'team')) : e.actorId === userId)),
+    records: state.records.filter((r) => can(r.recipientId, r.domain)),
+    medications: state.medications.filter((x) => can(x.recipientId, 'medical')),
+    doseLogs: state.doseLogs.filter((x) => can(x.recipientId, 'medical')),
   };
+}
+
+/** Upgrades saved data from before care teams and records existed. Adds, never removes. */
+export function upgrade(state: State, now = Date.now()): State {
+  if ((state.schema ?? 1) >= 2) return state;
+  const s = state as State & Partial<State>;
+  s.orgs ??= [{ id: 'org-hub', name: 'SANAD Care Hub' }];
+  s.memberships ??= [];
+  s.invites ??= [];
+  s.consents ??= [];
+  s.approvals ??= [];
+  s.audit ??= [];
+  s.records ??= [];
+  s.medications ??= [];
+  s.doseLogs ??= [];
+  const org = s.orgs[0].id;
+  for (const r of s.recipients) {
+    r.orgId ??= org;
+    r.accessVersion ??= 1;
+  }
+  for (const u of s.users) {
+    if (isOrgStaff(u)) u.orgId ??= org;
+    for (const rid of u.recipients) {
+      if (s.memberships.some((m) => m.userId === u.id && m.recipientId === rid)) continue;
+      // Keep the access people already had through their existing care links.
+      const domains = ROLE_DOMAINS[u.role].filter((d) => d !== 'wellbeing_notes');
+      s.seq += 1;
+      s.memberships.push({ id: `g${s.seq.toString(36)}`, recipientId: rid, userId: u.id, relationship: isHousehold(u.role) ? 'Family' : u.title, authority: 'none', authorityVerified: false, domains, status: 'active', grantedBy: 'system', createdAt: now });
+      s.seq += 1;
+      s.consents.push({ id: `k${s.seq.toString(36)}`, recipientId: rid, subjectId: u.id, change: 'grant', domains, basis: 'recorded', givenBy: 'system', evidence: 'Carried over from the care links that existed before permissions were added', at: now });
+    }
+  }
+  s.schema = 2;
+  return s;
 }
 
 export const PALETTE = ['#476ADB', '#1F9E8F', '#C9861A', '#7A5AC8', '#D2566B', '#3E8E3A', '#2B7BB9', '#9A6B3F'];
@@ -707,7 +812,8 @@ export function initialsOf(name: string): string {
 }
 
 // ---------------------------------------------------------------- self sign-up
-export const SELF_SIGNUP_ROLES: Role[] = ['family', 'caregiver', 'doctor', 'transport', 'pharmacy', 'social'];
+/** Anyone can create an account in these roles. Professionals see nobody until a care team invites them. */
+export const SELF_SIGNUP_ROLES: Role[] = ['self', 'family', 'caregiver', 'doctor', 'psychologist', 'physio', 'educator', 'transport', 'pharmacy', 'social'];
 
 export interface RegisterInput {
   role: Role;
@@ -716,8 +822,10 @@ export interface RegisterInput {
   title?: string;
   org?: string;
   skills?: string[];
-  /** Family only: the person they care for. */
-  recipient?: { name: string; age: number; area: string; note?: string } & ProfileInput;
+  /** Family: the person they care for. Self: their own details (name comes from the account). */
+  recipient?: { name: string; age: number; area: string; note?: string; relationship?: string; claimsAuthority?: boolean } & ProfileInput;
+  /** Joining a care team through an invitation. */
+  inviteCode?: string;
 }
 
 export interface RegisterResult {
@@ -728,42 +836,78 @@ export interface RegisterResult {
 }
 
 /** Creates an account for a new person. Pure: returns a new state, throws EngineError on invalid input. */
-export function register(prev: State, input: RegisterInput, now = Date.now()): RegisterResult {
-  const state = clone(prev);
+export function register(prev: State, input: RegisterInput, now = Date.now(), ctx: CareCtx = {}): RegisterResult {
+  let state = upgrade(clone(prev), now);
   if (!SELF_SIGNUP_ROLES.includes(input.role)) throw fail('e_signup_role', undefined, 403);
   const name = requireText(input.name, 'lbl_name', 2);
   const email = requireText(input.email, 'lbl_email', 5).toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw fail('e_email');
   if (state.users.some((u) => u.email.toLowerCase() === email)) throw fail('e_email_taken', undefined, 409);
+  const invite = input.inviteCode ? state.invites.find((i) => i.code === input.inviteCode!.trim()) : undefined;
+  if (input.inviteCode && !invite) throw fail('e_invite_code', undefined, 404);
+  if (invite && invite.role !== input.role) throw fail('e_invite_role_mismatch', { role: invite.role }, 403);
 
+  const userId = nextId(state, 'u');
   let recipientId: string | undefined;
-  if (input.role === 'family') {
+  // A new profile is only created when the person is not joining an existing one through an invitation.
+  const createsProfile = !invite && (input.role === 'family' || input.role === 'self');
+  if (createsProfile) {
     const r = input.recipient;
-    const rName = requireText(r?.name, 'lbl_recipient', 2);
+    const rName = input.role === 'self' ? name : requireText(r?.name, 'lbl_recipient', 2);
     const age = Math.round(Number(r?.age));
     if (!Number.isFinite(age) || age < 1 || age > 120) throw fail('e_age');
+    if (input.role === 'self' && age < 18) throw fail('e_minor_self', undefined, 400);
     recipientId = nextId(state, 'r');
     const note = (r?.note ?? '').trim();
-    state.recipients.push({ id: recipientId, name: rName, age, area: (r?.area ?? '').trim(), note, ...cleanProfile(r, age, note) });
+    state.recipients.push({ id: recipientId, name: rName, age, area: (r?.area ?? '').trim(), note, ...cleanProfile(r, age, note), orgId: state.orgs[0]?.id, accessVersion: 1, updatedAt: now });
+    const self = input.role === 'self';
+    const authority = self ? 'self' : r?.claimsAuthority ? 'guardian' : 'none';
+    const domains: Domain[] = self ? AUTHORITY_DOMAINS : [...ROLE_DOMAINS.family, ...(isMinor({ age }) ? (['academic'] as Domain[]) : [])];
+    state.seq += 1;
+    state.memberships.push({
+      id: `g${state.seq.toString(36)}`,
+      recipientId,
+      userId,
+      relationship: self ? 'Self' : (r?.relationship ?? '').trim().slice(0, 60) || 'Family',
+      authority,
+      // Your own authority over your own profile is clear; a guardian claim waits for a coordinator to check evidence.
+      authorityVerified: self,
+      domains: DOMAINS.filter((d) => domains.includes(d)),
+      status: 'active',
+      grantedBy: userId,
+      createdAt: now,
+    });
+    state.seq += 1;
+    state.consents.push({ id: `k${state.seq.toString(36)}`, recipientId, subjectId: userId, change: 'grant', domains, basis: self ? 'self' : 'creator', givenBy: userId, at: now });
+    audit(state, userId, recipientId, 'overview', 'profile_created', msg('au_profile_created', { actor: name, name: rName }), now, recipientId);
   }
 
   const user: User = {
-    id: nextId(state, 'u'),
+    id: userId,
     name,
     role: input.role,
     title: (input.title ?? '').trim() || ROLE_LABEL[input.role],
-    org: (input.org ?? '').trim() || (input.role === 'family' ? 'Family' : ''),
+    org: (input.org ?? '').trim() || (isHousehold(input.role) ? 'Family' : ''),
     email,
     initials: initialsOf(name),
     color: PALETTE[state.users.length % PALETTE.length],
     available: true,
     skills: (input.skills ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 12),
-    recipients: recipientId ? [recipientId] : [],
+    recipients: [],
+    orgId: null,
   };
   state.users.push(user);
   notify(state, [user.id], null, msg('n_signup_welcome', { first: name.split(' ')[0], role: user.role }), 'system', now);
-  notify(state, coordinators(state), null, msg(recipientId ? 'n_signup_family' : 'n_signup_staff', { name, role: user.role, recipient: input.recipient?.name ?? '' }), 'system', now);
-  if (user.role !== 'family') pickUpQueue(state, now);
+  notify(state, coordinators(state), null, msg(recipientId ? 'n_signup_family' : 'n_signup_staff', { name, role: user.role, recipient: input.recipient?.name || name }), 'system', now);
+  let m = msg('m_signed_up', { first: name.split(' ')[0] });
+  if (invite) {
+    const res = apply(state, user.id, { type: 'accept_invite', code: invite.code }, now, ctx);
+    state = res.state;
+    recipientId = invite.recipientId;
+    m = res.m;
+  }
+  syncLinks(state, now);
+  if (!isHousehold(user.role)) pickUpQueue(state, now);
   state.version += 1;
-  return { state, userId: user.id, recipientId, m: msg('m_signed_up', { first: name.split(' ')[0] }) };
+  return { state, userId: user.id, recipientId, m };
 }

@@ -12,6 +12,39 @@ export interface RoleConfig {
 }
 
 export const ROLE_CONFIG: Record<Role, RoleConfig> = {
+  self: {
+    focus: 'Your own care in one place: what is planned, who is helping, and a quick way to ask for help.',
+    templates: [
+      { label: 'Need a ride', title: 'Need a ride to my appointment', description: 'Pickup from home.' },
+      { label: 'Medicine running low', title: 'My medicine is running low', description: 'Need a refill before it runs out.' },
+      { label: 'Feeling low', title: 'Feeling low and would like to talk', description: 'Would like someone to call me.' },
+    ],
+  },
+  psychologist: {
+    focus: 'Well-being concerns routed to you for the people whose care team you are on.',
+    templates: [
+      { label: 'Session change', title: 'Therapy session needs to move', description: 'Please find a new time this week.' },
+      { label: 'Transport to session', title: 'Ride needed to the therapy session', description: 'Pickup from home.' },
+    ],
+  },
+  physio: {
+    focus: 'Rehab questions and exercise plans for the people on your caseload.',
+    templates: [
+      { label: 'Equipment needed', title: 'Walking frame needs adjusting', description: 'Height is wrong after the last visit.' },
+      { label: 'Book transport', title: 'Ride needed to the physio session', description: 'Wheelchair-accessible vehicle needed.' },
+    ],
+  },
+  educator: {
+    focus: 'School and learning matters for the students whose care team you are on.',
+    templates: [
+      { label: 'Accessibility at school', title: 'Lift at school is out of service', description: 'Needs another way between floors this week.' },
+      { label: 'Learning support', title: 'Needs extra learning support in class', description: 'Describe what would help.' },
+    ],
+  },
+  admin: {
+    focus: 'Care teams, consent and verification across your organisation.',
+    templates: [],
+  },
   family: {
     focus: 'Raise anything that worries you. SANAD sends it straight to the person who can fix it, and you can follow every step.',
     templates: [

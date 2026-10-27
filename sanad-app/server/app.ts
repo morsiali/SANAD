@@ -3,7 +3,9 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { apply, register, sweep, viewFor, type RegisterInput } from '../shared/engine';
+import { apply, register, sweep, upgrade, viewFor, type RegisterInput } from '../shared/engine';
+import { audit } from '../shared/care-engine';
+import { msg } from '../shared/messages';
 import { createSeed } from '../shared/seed';
 import { EngineError, type Action, type State } from '../shared/types';
 
@@ -48,9 +50,12 @@ export function createApp(opts: AppOptions = {}) {
 
   if (dataFile && existsSync(dataFile)) {
     db = JSON.parse(readFileSync(dataFile, 'utf8')) as Persisted;
+    db.state = upgrade(db.state); // older data files gain care teams and records without losing anything
   } else {
     db = fresh();
   }
+
+  const rand = () => randomBytes(12).toString('base64url');
 
   const save = () => {
     if (!dataFile) return;
@@ -117,20 +122,46 @@ export function createApp(opts: AppOptions = {}) {
     res.json({ token: sign(user.id), userId: user.id });
   });
 
+  app.get('/api/invite/:code', (req, res) => {
+    const i = db.state.invites.find((x) => x.code === req.params.code);
+    if (!i) return res.status(404).json({ error: 'That invitation is not valid' });
+    const r = db.state.recipients.find((x) => x.id === i.recipientId);
+    res.json({ role: i.role, email: i.email, recipient: (r?.preferredName || r?.name || '').split(' ')[0], status: i.status === 'pending' && i.expiresAt < Date.now() ? 'expired' : i.status });
+  });
+
   app.post('/api/register', (req, res) => {
     const body = (req.body ?? {}) as RegisterInput & { password?: string };
     const password = String(body.password ?? '');
     if (password.length < 8) return res.status(400).json({ error: 'Use at least 8 characters for the password' });
+    const rc = body.recipient;
     try {
-      const r = register(db.state, {
-        role: body.role,
-        name: String(body.name ?? ''),
-        email: String(body.email ?? ''),
-        title: String(body.title ?? ''),
-        org: String(body.org ?? ''),
-        skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
-        recipient: body.recipient ? { name: String(body.recipient.name ?? ''), age: Number(body.recipient.age), area: String(body.recipient.area ?? ''), note: String(body.recipient.note ?? '') } : undefined,
-      });
+      const r = register(
+        db.state,
+        {
+          role: body.role,
+          name: String(body.name ?? ''),
+          email: String(body.email ?? ''),
+          title: String(body.title ?? ''),
+          org: String(body.org ?? ''),
+          skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
+          inviteCode: body.inviteCode ? String(body.inviteCode) : undefined,
+          recipient: rc
+            ? {
+                name: String(rc.name ?? ''),
+                age: Number(rc.age),
+                area: String(rc.area ?? ''),
+                note: String(rc.note ?? ''),
+                relationship: String(rc.relationship ?? ''),
+                claimsAuthority: rc.claimsAuthority === true,
+                support: rc.support ? String(rc.support) : undefined,
+                living: rc.living ? String(rc.living) : undefined,
+                needs: Array.isArray(rc.needs) ? rc.needs.map(String) : undefined,
+              }
+            : undefined,
+        },
+        Date.now(),
+        { rand },
+      );
       db.state = r.state;
       db.credentials[r.userId] = hashPassword(password);
       save();
@@ -152,7 +183,7 @@ export function createApp(opts: AppOptions = {}) {
     const action = req.body?.action as Action | undefined;
     if (!action || typeof action !== 'object' || typeof action.type !== 'string') return res.status(400).json({ error: 'Missing action' });
     try {
-      const result = apply(db.state, req.userId!, action);
+      const result = apply(db.state, req.userId!, action, Date.now(), { rand });
       db.state = result.state;
       if (action.type === 'add_user' && result.createdId) db.credentials[result.createdId] = hashPassword(DEMO_PASSWORD);
       save();
@@ -187,6 +218,9 @@ export function createApp(opts: AppOptions = {}) {
   });
 
   app.get('/api/export', auth, (req: AuthedRequest, res) => {
+    // Exports contain only what this person may see (the same filtered view) and are recorded in the audit log.
+    audit(db.state, req.userId!, null, 'overview', 'export', msg('au_export', { actor: db.state.users.find((u) => u.id === req.userId)?.name ?? '' }), Date.now());
+    save();
     res.setHeader('Content-Disposition', `attachment; filename="sanad-export-${new Date().toISOString().slice(0, 10)}.json"`);
     res.json(viewFor(db.state, req.userId!));
   });

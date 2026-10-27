@@ -17,6 +17,9 @@ import { Inbox } from './pages/Inbox';
 import { SettingsPage } from './pages/Settings';
 import { PublicWorkflow, WorkflowPage } from './pages/Workflow';
 import { Register } from './pages/Register';
+import { People } from './pages/People';
+import { Profile } from './pages/Profile';
+import { Approvals } from './pages/Approvals';
 
 function NotFound() {
   return (
@@ -41,6 +44,9 @@ export default function App() {
             <Route path="challenges" element={<Challenges />} />
             <Route path="challenges/:id" element={<ChallengeDetail />} />
             <Route path="report" element={<Report />} />
+            <Route path="people" element={<People />} />
+            <Route path="people/:id" element={<Profile />} />
+            <Route path="approvals" element={<Approvals />} />
             <Route path="workflow" element={<WorkflowPage />} />
             <Route path="intelligence" element={<Intelligence />} />
             <Route path="playbooks" element={<Playbooks />} />

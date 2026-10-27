@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CATEGORY_LABEL, PRIORITIES, STAGES, STAGE_LABEL, type Category, type Challenge, type Stage } from '../../shared/types';
+import { CATEGORY_LABEL, PRIORITIES, STAGES, STAGE_LABEL, type Category, type Challenge, type Stage, isHousehold } from '../../shared/types';
 import { isActive, PRIORITY_WEIGHT } from '../../shared/routing';
 import { useSession } from '../lib/store';
 import { t, tc, tm, tn } from '../lib/i18n';
@@ -25,7 +25,7 @@ export function Challenges() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<Stage | null>(null);
 
-  const defaultScope = me.role === 'coordinator' || me.role === 'family' ? 'all' : 'mine';
+  const defaultScope = me.role === 'coordinator' || isHousehold(me.role) ? 'all' : 'mine';
   const scope = sp.get('scope') ?? defaultScope;
   const stage = sp.get('stage') ?? '';
   const priority = sp.get('priority') ?? '';
@@ -80,8 +80,8 @@ export function Challenges() {
   }, [view, me, scope, stage, priority, category, person, care, flag, sort, q, showClosed, layout]);
 
   const scopes = [
-    ...(me.role === 'family' ? [] : [{ k: 'mine', label: 'Assigned to me' }]),
-    ...(me.role === 'family' || me.role === 'coordinator' ? [] : [{ k: 'team', label: 'My team' }]),
+    ...(isHousehold(me.role) ? [] : [{ k: 'mine', label: 'Assigned to me' }]),
+    ...(isHousehold(me.role) || me.role === 'coordinator' ? [] : [{ k: 'team', label: 'My team' }]),
     { k: 'reported', label: 'Reported by me' },
     { k: 'all', label: me.role === 'coordinator' ? 'Everything' : 'All I can see' },
   ];
@@ -164,7 +164,7 @@ export function Challenges() {
         <select value={person} onChange={(e) => set('person', e.target.value)} aria-label="Person">
           <option value="">Everyone</option>
           {view.recipients
-            .filter((r) => me.role !== 'family' || me.recipients.includes(r.id))
+            .filter((r) => !isHousehold(me.role) || me.recipients.includes(r.id))
             .map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}

@@ -1,9 +1,32 @@
 // Two interchangeable backends with one interface:
 //  - server: the Express API (multi-user, persisted to disk, live updates over SSE)
 //  - browser: the same engine running locally, persisted to localStorage, synced across tabs
-import { apply, register, sweep, viewFor, type RegisterInput } from '../../shared/engine';
+import { apply, register, sweep, upgrade, viewFor, type RegisterInput } from '../../shared/engine';
+import { audit } from '../../shared/care-engine';
+import { msg } from '../../shared/messages';
 import { createSeed } from '../../shared/seed';
 import type { Action, Msg, Role, State, View } from '../../shared/types';
+
+export interface InviteInfo {
+  role: Role;
+  email: string;
+  recipient: string;
+  status: 'pending' | 'accepted' | 'expired' | 'cancelled';
+}
+
+/** Unguessable invitation codes. */
+export function randomCode(): string {
+  const b = new Uint8Array(12);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(36).padStart(2, '0')).join('').slice(0, 20);
+}
+
+export const inviteInfoOf = (s: State, code: string, now = Date.now()): InviteInfo | null => {
+  const i = s.invites.find((x) => x.code === code.trim());
+  if (!i) return null;
+  const r = s.recipients.find((x) => x.id === i.recipientId);
+  return { role: i.role, email: i.email, recipient: (r?.preferredName || r?.name || '').split(' ')[0], status: i.status === 'pending' && i.expiresAt < now ? 'expired' : i.status };
+};
 
 declare const __SANAD_MODE__: string;
 
@@ -36,6 +59,7 @@ export interface Backend {
   changePassword(token: string, current: string, next: string): Promise<string>;
   reset(token: string): Promise<ActResult>;
   exportData(token: string): Promise<unknown>;
+  inviteInfo(code: string): Promise<InviteInfo | null>;
 }
 
 export class ApiError extends Error {
@@ -73,6 +97,14 @@ function serverBackend(): Backend {
     changePassword: async (token, current, next) => (await call<{ message: string }>('/api/password', { method: 'POST', token, body: JSON.stringify({ current, next }) })).message,
     reset: (token) => call('/api/reset', { method: 'POST', token }),
     exportData: (token) => call('/api/export', { token }),
+    inviteInfo: async (code) => {
+      try {
+        return await call<InviteInfo>(`/api/invite/${encodeURIComponent(code)}`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
     subscribe(token, onChange) {
       let es: EventSource | null = null;
       let closed = false;
@@ -108,7 +140,8 @@ function serverBackend(): Backend {
 }
 
 // --------------------------------------------------------------- browser ----
-const STATE_KEY = 'sanad.browser.state.v1';
+// v2: care teams, records and medicines. Earlier demo data (v1) is left untouched in the browser.
+const STATE_KEY = 'sanad.browser.state.v2';
 const CREDS_KEY = 'sanad.browser.creds.v1';
 const DEMO_PASSWORD = 'sanad123';
 
@@ -142,7 +175,7 @@ function browserBackend(): Backend {
     const raw = safeGet(STATE_KEY);
     if (raw) {
       try {
-        memory = JSON.parse(raw) as State;
+        memory = upgrade(JSON.parse(raw) as State);
       } catch {
         memory = null;
       }
@@ -190,7 +223,7 @@ function browserBackend(): Backend {
     async register(input) {
       if (input.password.length < 8) throw new ApiError('Use at least 8 characters for the password', 400);
       try {
-        const r = register(read(), input);
+        const r = register(read(), input, Date.now(), { rand: randomCode });
         creds[r.userId] = input.password;
         write(r.state);
         return { token: r.userId, userId: r.userId };
@@ -207,7 +240,7 @@ function browserBackend(): Backend {
     async act(token, action) {
       const me = userFromToken(token);
       try {
-        const r = apply(read(), me, action);
+        const r = apply(read(), me, action, Date.now(), { rand: randomCode });
         write(r.state);
         return { view: viewFor(r.state, me), message: r.message, m: r.m, createdId: r.createdId };
       } catch (e) {
@@ -236,8 +269,13 @@ function browserBackend(): Backend {
       return { view: viewFor(s, me), message: 'Demo workspace reset' };
     },
     async exportData(token) {
-      return viewFor(read(), userFromToken(token));
+      const me = userFromToken(token);
+      const s = read();
+      audit(s, me, null, 'overview', 'export', msg('au_export', { actor: s.users.find((u) => u.id === me)?.name ?? '' }), Date.now());
+      write(s, false);
+      return viewFor(s, me);
     },
+    inviteInfo: async (code) => inviteInfoOf(read(), code),
   };
 }
 

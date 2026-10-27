@@ -2,10 +2,17 @@
 
 **Live demo:** https://morsiali.github.io/SANAD/ — runs fully in the browser; sign in with any demo account (password `sanad123`). Switch between English and العربية from the top bar.
 
-SANAD is a full-stack web app for elderly-care coordination in the UAE. Anyone in a care circle
-(family, caregiver, doctor, coordinator, transport, pharmacy, social services) reports a problem in
-plain words. SANAD classifies it, sets its urgency, picks the best available person and tracks it
-until the family confirms it is solved.
+SANAD is a full-stack web app for coordinated family care in the UAE — older adults, children and
+People of Determination. Anyone in a care circle (the person themselves, family, caregivers, doctors,
+psychologists, physiotherapists, educators, coordinators, transport, pharmacy, social services) reports a
+problem in plain words; SANAD routes it to the right person and tracks it until it is solved. Each person
+has a profile with medical, well-being, academic, social, activity and rehab records, shared only with
+the care-team members they (or their verified guardian) consent to.
+
+Demo accounts include `huda@sanad.ae` (guardian of Rashid, 11), `grace@sanad.ae` (his teacher),
+`salma@sanad.ae` (psychologist), `faisal@sanad.ae` (physiotherapist), `khadija@sanad.ae` (person
+receiving care), `majid@sanad.ae` (organisation admin) and `hind@sanad.ae` (a second organisation).
+All data is synthetic.
 
 ## Run it
 
@@ -40,6 +47,12 @@ Reported → Routed (rule match → availability → best person, or coordinator
 → Accepted → In progress → Resolved → Confirmed by the family → Closed. Exceptions: hand off
 (back to routing), missed response time (escalation to the coordinator), not fixed (reopen).
 
+## Profiles, consent and permissions
+
+See **[docs/PHASE-1.md](docs/PHASE-1.md)** for the audit, the delivery plan, the roles and permissions
+matrix, the consent and approval rules, test results and known limitations. Copy `.env.example` for the
+server settings.
+
 ## Languages
 
 English and Arabic, with a full right-to-left layout. Use the language button in the top bar, or
@@ -56,9 +69,9 @@ Settings → Pages → Build and deployment → Source: **GitHub Actions**.
 ## Tests
 
 ```bash
-npm test           # 43 unit + API tests (routing, workflow, permissions, SLA, intelligence, auth, Arabic)
+npm test           # 84 unit + API tests (routing, permissions, consent, approvals, records, medicines, Arabic)
 npm run typecheck
-npm run build && npm run e2e   # 41 end-to-end checks in Chromium, several users at once, English and Arabic
+npm run build && npm run e2e   # 64 end-to-end checks in Chromium, several users at once, English and Arabic
 ```
 `npm run e2e` uses Playwright. The first time, run `npx playwright install chromium`.
 

@@ -24,7 +24,10 @@ export function Inbox() {
 
   const open = async (n: Notification) => {
     if (!n.read) await act({ type: 'mark_read', notificationId: n.id }, { quiet: true });
-    if (n.challengeId && view.challenges.some((c) => c.id === n.challengeId)) nav(`/app/challenges/${n.challengeId}`);
+    if (n.challengeId && view.challenges.some((c) => c.id === n.challengeId)) return nav(`/app/challenges/${n.challengeId}`);
+    const k = n.m?.k ?? '';
+    if (k.startsWith('n_approval') || k === 'n_invited') return nav('/app/approvals');
+    if (k === 'n_dose_missed' || k === 'n_access_changed' || k === 'n_joined_team' || k === 'n_authority_verified') return nav('/app/people');
   };
 
   return (

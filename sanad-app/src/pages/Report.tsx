@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { CATEGORY_LABEL, PRIORITIES, ROLE_LABEL, type Category, type Priority } from '../../shared/types';
+import { CATEGORY_LABEL, PRIORITIES, ROLE_LABEL, type Category, type Priority , isHousehold } from '../../shared/types';
 import { computeLoads, decideRouting } from '../../shared/routing';
 import { rankPlaybooks } from '../../shared/intelligence';
 import { userName } from '../../shared/engine';
@@ -14,7 +14,7 @@ export function Report() {
   const { view, me, act } = useSession();
   const nav = useNavigate();
   const [sp] = useSearchParams();
-  const people = view.recipients.filter((r) => me.role !== 'family' || me.recipients.includes(r.id));
+  const people = view.recipients.filter((r) => !isHousehold(me.role) || me.recipients.includes(r.id));
   const tpl = ROLE_CONFIG[me.role].templates[Number(sp.get('t'))];
   const [title, setTitle] = useState(tpl?.title ?? sp.get('title') ?? '');
   const [description, setDescription] = useState(tpl?.description ?? '');
