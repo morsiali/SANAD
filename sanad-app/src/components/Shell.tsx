@@ -60,7 +60,9 @@ function Frame() {
   const peopleLabel = me.role === 'self' ? 'My care' : isHousehold(me.role) ? 'My family' : 'People we care for';
   const items = [
     { to: '/app', icon: 'home', label: 'Dashboard', end: true },
+    ...(isAdmin ? [] : [{ to: '/app/today', icon: 'sun', label: 'Today' }]),
     { to: '/app/people', icon: 'heart', label: peopleLabel },
+    ...(isAdmin ? [] : [{ to: '/app/calendar', icon: 'calendar', label: 'Calendar' }]),
     ...(isAdmin ? [] : [{ to: '/app/challenges', icon: 'layers', label: 'Challenges', badge: mine + toConfirm + triage || undefined }]),
     ...(isAdmin ? [] : [{ to: '/app/report', icon: 'plus', label: 'Report a challenge' }]),
     { to: '/app/approvals', icon: 'shield', label: 'Approvals', badge: approvalsForMe || undefined },

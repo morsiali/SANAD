@@ -19,7 +19,8 @@ import {
 import { computeLoads, decideRouting, isActive, selectAssignee } from './routing';
 import { en, msg } from './messages';
 import { cleanProfile, type ProfileInput } from './care';
-import { applyCare, audit, expireCare, linkMember, syncLinks, unlinkMember, type CareCtx } from './care-engine';
+import { audit, dispatch, expireCare, linkMember, syncLinks, unlinkMember, type CareCtx } from './care-engine';
+import { canSeeTask, sweepPlans } from './plans-engine';
 import { AUTHORITY_DOMAINS, DOMAINS, ROLE_DOMAINS, canManageTeam, canWrite, domainsFor, isLive, isMinor, isOrgStaff } from './access';
 
 export const fail = (k: string, p?: Record<string, string | number | Msg>, status = 400) => {
@@ -672,7 +673,7 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
     }
 
     default: {
-      const res = applyCare(state, me, action, now, ctx);
+      const res = dispatch(state, me, action, now, ctx);
       if (!res) throw fail('e_unknown', { type: (action as { type: string }).type });
       m = res.m;
       createdId = res.createdId;
@@ -700,6 +701,7 @@ function pickUpQueue(state: State, now: number): number {
 /** Time-based rules: SLA breaches escalate automatically. Mutates; returns true when something changed. */
 export function sweep(state: State, now = Date.now()): boolean {
   let changed = expireCare(state, now);
+  if (sweepPlans(state, now)) changed = true;
   if (state.settings.autoEscalate) {
     for (const c of state.challenges) {
       if (isActive(c) && !c.escalated && c.dueAt < now) {
@@ -762,13 +764,27 @@ export function viewFor(state: State, userId: string, now = Date.now()): View {
     records: state.records.filter((r) => can(r.recipientId, r.domain)),
     medications: state.medications.filter((x) => can(x.recipientId, 'medical')),
     doseLogs: state.doseLogs.filter((x) => can(x.recipientId, 'medical')),
+    plans: state.plans.filter((p) => can(p.recipientId, p.domain)),
+    tasks: state.tasks.filter((t) => canSeeTask(state, userId, t, now)),
+    appointments: state.appointments.filter((a) => can(a.recipientId, a.domain)),
+    // File contents stored on the server are never part of the view; they are fetched one by one, with a fresh permission check.
+    documents: state.documents.filter((d) => can(d.recipientId, d.domain)).map((d) => ({ ...d, fileKey: undefined })),
   };
 }
 
 /** Upgrades saved data from before care teams and records existed. Adds, never removes. */
 export function upgrade(state: State, now = Date.now()): State {
-  if ((state.schema ?? 1) >= 2) return state;
+  if ((state.schema ?? 1) >= 3) return state;
   const s = state as State & Partial<State>;
+  // Schema 3: plans, tasks, appointments and documents.
+  s.plans ??= [];
+  s.tasks ??= [];
+  s.appointments ??= [];
+  s.documents ??= [];
+  if ((state.schema ?? 1) >= 2) {
+    s.schema = 3;
+    return s;
+  }
   s.orgs ??= [{ id: 'org-hub', name: 'SANAD Care Hub' }];
   s.memberships ??= [];
   s.invites ??= [];
@@ -795,7 +811,7 @@ export function upgrade(state: State, now = Date.now()): State {
       s.consents.push({ id: `k${s.seq.toString(36)}`, recipientId: rid, subjectId: u.id, change: 'grant', domains, basis: 'recorded', givenBy: 'system', evidence: 'Carried over from the care links that existed before permissions were added', at: now });
     }
   }
-  s.schema = 2;
+  s.schema = 3;
   return s;
 }
 

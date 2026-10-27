@@ -117,6 +117,36 @@ describe('API', () => {
     expect(again.status).toBe(409);
   });
 
+  it('uploads documents through the server, checks content, and re-checks access on every download', async () => {
+    const mariam = await login('mariam@sanad.ae');
+    const { samplePdf } = await import('../shared/seed');
+    const b64 = samplePdf(['Discharge letter (synthetic)']).split(',')[1];
+    const up = await request(app).post('/api/documents').set('Authorization', `Bearer ${mariam}`).send({ recipientId: 'r-fatima', domain: 'medical', title: 'Discharge letter', description: '', fileName: 'letter.pdf', mime: 'application/pdf', dataBase64: b64 });
+    expect(up.status).toBe(200);
+    const id = up.body.createdId as string;
+    const doc = up.body.view.documents.find((d: { id: string }) => d.id === id);
+    expect(doc).toMatchObject({ storage: 'server', mime: 'application/pdf' });
+    expect(doc.fileKey).toBeUndefined();
+    const dl = await request(app).get(`/api/documents/${id}`).set('Authorization', `Bearer ${mariam}`);
+    expect(dl.status).toBe(200);
+    expect(dl.headers['content-disposition']).toMatch(/attachment/);
+    expect(dl.headers['x-content-type-options']).toBe('nosniff');
+    expect(dl.body.subarray(0, 4).toString()).toBe('%PDF');
+    // The teacher is not on Fatima's team: no download, no metadata.
+    const grace = await login('grace@sanad.ae');
+    expect((await request(app).get(`/api/documents/${id}`).set('Authorization', `Bearer ${grace}`)).status).toBe(404);
+    // A file pretending to be a PDF is refused, and so is a client-chosen storage key.
+    const fake = await request(app).post('/api/documents').set('Authorization', `Bearer ${mariam}`).send({ recipientId: 'r-fatima', domain: 'medical', title: 'Fake', description: '', fileName: 'x.pdf', mime: 'application/pdf', dataBase64: Buffer.from('<html>').toString('base64') });
+    expect(fake.status).toBe(400);
+    const sneaky = await request(app).post('/api/action').set('Authorization', `Bearer ${mariam}`).send({ action: { type: 'add_document', recipientId: 'r-fatima', domain: 'medical', title: 'Sneaky', description: '', fileName: 'x.pdf', mime: 'application/pdf', size: 1, fileKey: 'stolen-key' } });
+    expect(sneaky.status).toBe(400);
+    // Someone without the section cannot upload into it.
+    const denied = await request(app).post('/api/documents').set('Authorization', `Bearer ${grace}`).send({ recipientId: 'r-rashid', domain: 'medical', title: 'Report', description: '', fileName: 'r.pdf', mime: 'application/pdf', dataBase64: b64 });
+    expect(denied.status).toBe(403);
+    const state = await request(app).get('/api/state').set('Authorization', `Bearer ${mariam}`);
+    expect(state.body.audit.some((e: { type: string; targetId: string }) => e.type === 'doc_viewed' && e.targetId === id)).toBe(true);
+  });
+
   it('changes passwords', async () => {
     const token = await login('noura@sanad.ae');
     const bad = await request(app).post('/api/password').set('Authorization', `Bearer ${token}`).send({ current: 'x', next: 'longenough' });

@@ -285,7 +285,7 @@ describe('upgrading saved data', () => {
     for (const k of ['memberships', 'invites', 'consents', 'approvals', 'audit', 'records', 'medications', 'doseLogs', 'orgs'] as const) delete (old as Partial<State>)[k];
     for (const r of old.recipients) delete r.orgId;
     const up = upgrade(old, NOW);
-    expect(up.schema).toBe(2);
+    expect(up.schema).toBe(3);
     expect(up.challenges.length).toBe(s.challenges.length);
     expect(up.memberships.some((m) => m.userId === 'u-mariam' && m.recipientId === 'r-fatima')).toBe(true);
     expect(domainsFor(up, 'u-aisha', 'r-fatima', NOW)).toContain('medical');

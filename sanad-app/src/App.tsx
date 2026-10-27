@@ -20,6 +20,8 @@ import { Register } from './pages/Register';
 import { People } from './pages/People';
 import { Profile } from './pages/Profile';
 import { Approvals } from './pages/Approvals';
+import { Today } from './pages/Today';
+import { Calendar } from './pages/Calendar';
 
 function NotFound() {
   return (
@@ -47,6 +49,8 @@ export default function App() {
             <Route path="people" element={<People />} />
             <Route path="people/:id" element={<Profile />} />
             <Route path="approvals" element={<Approvals />} />
+            <Route path="today" element={<Today />} />
+            <Route path="calendar" element={<Calendar />} />
             <Route path="workflow" element={<WorkflowPage />} />
             <Route path="intelligence" element={<Intelligence />} />
             <Route path="playbooks" element={<Playbooks />} />

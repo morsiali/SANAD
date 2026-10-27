@@ -11,10 +11,14 @@ import { ChallengeRow, Empty, Field, Icon, Modal } from '../components/ui';
 import { CareTags } from '../components/CareProfile';
 import { MedicationPanel, RecordSection } from '../components/records';
 import { CareTeamPanel } from '../components/careteam';
+import { PlansPanel } from '../components/tasks';
+import { AppointmentsPanel } from '../components/appointments';
+import { DocumentsPanel } from '../components/documents';
+import { ProgressPanel } from '../components/progress';
 import { EditPerson, PersonAvatar } from './People';
 
-type Tab = Domain | 'history';
-const TAB_LABEL: Record<Tab, string> = { ...DOMAIN_LABEL, history: 'Activity history' };
+type Tab = Domain | 'history' | 'plans' | 'appointments' | 'documents' | 'progress';
+const TAB_LABEL: Record<Tab, string> = { ...DOMAIN_LABEL, history: 'Activity history', plans: 'Plans & tasks', appointments: 'Appointments', documents: 'Documents', progress: 'Progress' };
 
 export function Profile() {
   const { id } = useParams();
@@ -28,7 +32,10 @@ export function Profile() {
       </div>
     );
   }
-  const tabs = profileTabs(view, r);
+  // Overview first, then the shared tools, then the record sections this person may see, then team and history.
+  const base = profileTabs(view, r);
+  const sections = base.filter((x) => x !== 'overview' && x !== 'team' && x !== 'history');
+  const tabs: Tab[] = ['overview', 'plans', 'appointments', ...sections, 'documents', 'progress', ...(base.includes('team') ? (['team'] as Tab[]) : []), 'history'];
   const asked = sp.get('tab') as Tab | null;
   const tab: Tab = asked && tabs.includes(asked) ? asked : 'overview';
   const mem = myMembership(view, r.id, now);
@@ -83,6 +90,10 @@ export function Profile() {
         {tab === 'activity' && <RecordSection recipientId={r.id} domain="activity" title="Sports & physical activity" intro="Activities they enjoy and take part in, within any restrictions recorded by their clinicians." />}
         {tab === 'rehab' && <RecordSection recipientId={r.id} domain="rehab" title="Physiotherapy & rehabilitation" intro="Plans and exercises come only from physiotherapists. Anyone on the team can log completion, pain or difficulty." />}
         {tab === 'team' && <CareTeamPanel recipientId={r.id} />}
+        {tab === 'plans' && <PlansPanel recipientId={r.id} />}
+        {tab === 'appointments' && <AppointmentsPanel recipientId={r.id} />}
+        {tab === 'documents' && <DocumentsPanel recipientId={r.id} />}
+        {tab === 'progress' && <ProgressPanel recipientId={r.id} />}
         {tab === 'history' && <History r={r} />}
       </div>
     </div>

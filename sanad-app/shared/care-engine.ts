@@ -5,12 +5,15 @@ import { DOMAINS, OPTIONAL_DOMAINS, ROLE_DOMAINS, SENSITIVE, authorityHolders, c
 import { kindOf, slotTime, sourceFor } from './records';
 import { fail, nextId, notify, requireText } from './engine';
 import { msg } from './messages';
+import { applyPlans, planVersion } from './plans-engine';
 
 export interface CareCtx {
   /** Set when an approved request is being carried out. */
   approvedBy?: string;
   /** Secure random code generator (server/browser); tests fall back to a deterministic one. */
   rand?: () => string;
+  /** Set only by the server's upload endpoint, after it has stored and checked the file. */
+  serverFile?: boolean;
 }
 
 export interface CareResult {
@@ -125,6 +128,8 @@ export function requestApproval(state: State, me: User, r: Recipient, action: Ac
 
 /** What an approval depends on. If this changes between request and decision, a new approval is needed. */
 export function targetVersion(state: State, action: Action, now: number): string {
+  const planV = planVersion(state, action);
+  if (planV !== null) return planV;
   if (action.type === 'set_access') {
     const mem = state.memberships.find((m) => m.id === action.membershipId);
     return mem ? `${mem.status}:${isLive(mem, now)}:${mem.domains.join(',')}` : 'missing';
@@ -140,6 +145,11 @@ export function targetVersion(state: State, action: Action, now: number): string
 }
 
 const fallbackCode = (state: State) => `inv${state.seq.toString(36)}${(state.seq * 7919).toString(36)}`;
+
+/** Runs any registered action (care-team actions here, plus plan/task/appointment actions). */
+export function dispatch(state: State, me: User, action: Action, now: number, ctx: CareCtx = {}): CareResult | null {
+  return applyCare(state, me, action, now, ctx) ?? applyPlans(state, me, action, now, ctx);
+}
 
 export function applyCare(state: State, me: User, action: Action, now: number, ctx: CareCtx = {}): CareResult | null {
   switch (action.type) {
@@ -570,8 +580,8 @@ export function applyCare(state: State, me: User, action: Action, now: number, c
       try {
         if (!requester) throw fail('e_person', undefined, 404);
         // Re-check that the requester may still ask for this (authorisation at execution time).
-        if (!canManageTeam(state, requester.id, r.id, now)) throw fail('e_manage_team', undefined, 403);
-        const res = applyCare(state, requester, a.action, now, { ...ctx, approvedBy: me.id });
+        if ((a.action.type === 'invite_member' || a.action.type === 'set_access') && !canManageTeam(state, requester.id, r.id, now)) throw fail('e_manage_team', undefined, 403);
+        const res = dispatch(state, requester, a.action, now, { ...ctx, approvedBy: me.id });
         if (!res) throw fail('e_unknown', { type: a.action.type });
         a.status = 'executed';
         notify(state, [a.requestedBy], null, msg('n_approval_done', { name: me.name, summary: a.summary }), 'system', now);

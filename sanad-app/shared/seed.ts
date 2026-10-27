@@ -2,13 +2,14 @@
 // All people and records are synthetic.
 // The history is produced by replaying real actions through the engine, so every
 // routing decision, notification and audit entry is genuine.
-import type { Action, Consent, Domain, Membership, Playbook, Rule, State, User } from './types';
+import type { Action, AppointmentInput, Consent, Domain, Membership, Playbook, Rule, State, TaskInput, User } from './types';
 import { apply, sweep } from './engine';
 import { syncLinks } from './care-engine';
 import { ROLE_DOMAINS } from './access';
 import { dayKey } from './records';
 
 const H = 3.6e6;
+
 
 const users: User[] = [
   { id: 'u-mariam', name: 'Mariam Al Noor', role: 'family', title: 'Daughter of Fatima', org: 'Family', email: 'mariam@sanad.ae', initials: 'MA', color: '#476ADB', available: true, skills: [], recipients: ['r-fatima'] },
@@ -243,6 +244,112 @@ function careScript(now: number): Step[] {
   return steps;
 }
 
+/** A tiny, valid one-page PDF with a few lines of text (synthetic sample documents). */
+export function samplePdf(lines: string[]): string {
+  const esc = (t: string) => t.replace(/[\\()]/g, (c) => `\\${c}`);
+  const text = lines.map((l, i) => `BT /F1 ${i === 0 ? 16 : 11} Tf 56 ${770 - i * 22} Td (${esc(l)}) Tj ET`).join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const b64 = typeof btoa === 'function' ? btoa(body) : Buffer.from(body, 'binary').toString('base64');
+  return `data:application/pdf;base64,${b64}`;
+}
+
+/** Hours ago (for seed steps) of a local clock time `days` from now. */
+function clock(now: number, days: number, hh: number, mm = 0): number {
+  const d = new Date(now);
+  d.setDate(d.getDate() + days);
+  d.setHours(hh, mm, 0, 0);
+  return d.getTime();
+}
+/** The next date (from tomorrow) that falls on one of the given weekdays (0 = Sunday). */
+function nextWeekday(now: number, days: number[], hh: number, mm = 0, skip = 0): number {
+  let found = 0;
+  for (let i = 1; i < 30; i++) {
+    const t = clock(now, i, hh, mm);
+    if (!days.includes(new Date(t).getDay())) continue;
+    if (found === skip) return t;
+    found += 1;
+  }
+  return clock(now, 7, hh, mm);
+}
+const future = (now: number, hh: number, mm = 0) => {
+  const t = clock(now, 0, hh, mm);
+  return t > now + 3_600_000 ? t : clock(now, 1, hh, mm);
+};
+
+/** Care plans, tasks, appointments, cover, a handover and sample documents — written through the engine. */
+function planScript(now: number): Step[] {
+  const task = (title: string, domain: Domain, ownerId: string | null, dueAt: number | null, extra: Partial<TaskInput> = {}): TaskInput => ({ title, notes: '', domain, ownerId, priority: 'medium', dueAt, recurrence: 'none', dependsOn: [], needsApproval: false, evidenceRequired: false, planId: null, ...extra });
+  const appt = (title: string, kind: AppointmentInput['kind'], domain: Domain, startAt: number, minutes: number, withWhom: string, location: string, attendeeIds: string[]): AppointmentInput => ({ title, kind, domain, startAt, endAt: startAt + minutes * 60_000, location, withWhom, attendeeIds, notes: '' });
+  const thursday = nextWeekday(now, [4], 10, 30);
+  const friday = nextWeekday(now, [5], 8, 0);
+  const monday = nextWeekday(now, [1], 16, 0);
+  const dialysis1 = nextWeekday(now, [0, 2, 4], 9, 0);
+  const dialysis2 = nextWeekday(now, [0, 2, 4], 9, 0, 1);
+  return [
+    // Plans
+    { at: 150, by: 'u-kareem', label: 'planSugar', action: { type: 'add_plan', recipientId: 'r-fatima', title: 'Keep blood sugar in range', goal: 'Fasting readings in the range agreed with Dr. Kareem. Review in two weeks.', domain: 'medical' } },
+    { at: 300, by: 'u-grace', label: 'planSchool', action: { type: 'add_plan', recipientId: 'r-rashid', title: 'Settle into Grade 5', goal: 'Rashid feels ready for changes in the school day and uses his accommodations.', domain: 'academic' } },
+    { at: 299, by: 'u-faisal', label: 'planLegs', action: { type: 'add_plan', recipientId: 'r-rashid', title: 'Stronger legs for longer walks', goal: 'Walk the school corridor without the frame by the end of term (his goal).', domain: 'rehab' } },
+    { at: 280, by: 'u-faisal', label: 'planKnee', action: { type: 'add_plan', recipientId: 'r-khadija', title: 'Back to walking without a stick', goal: 'Walk 500 m without a stick by week 8.', domain: 'rehab' } },
+    // Tasks
+    { at: 100, by: 'u-kareem', action: (i) => ({ type: 'add_task', recipientId: 'r-fatima', task: task('Send the evening glucose reading to Dr. Kareem', 'medical', 'u-aisha', future(now, 19), { priority: 'high', recurrence: 'daily', planId: i.planSugar }) }) },
+    { at: 30, by: 'u-mariam', action: (i) => ({ type: 'add_task', recipientId: 'r-fatima', task: task('Collect the Metformin refill', 'medical', 'u-mariam', clock(now, 2, 12), { priority: 'high', evidenceRequired: true, planId: i.planSugar }) }) },
+    { at: 90, by: 'u-mariam', label: 'eyeBook', action: { type: 'add_task', recipientId: 'r-fatima', task: task('Book the eye clinic follow-up', 'overview', 'u-mariam', null) } },
+    { at: 88, by: 'u-mariam', action: (i) => ({ type: 'task_status', taskId: i.eyeBook, status: 'completed', evidence: 'Booked for Thursday 10:30 at Al Barsha Eye Clinic.' }) },
+    { at: 40, by: 'u-khalid', action: { type: 'add_task', recipientId: 'r-hamad', task: task('Book the wheelchair brake repair', 'overview', 'u-sara', now - 30 * H, { priority: 'high' }) } },
+    { at: 250, by: 'u-huda', action: (i) => ({ type: 'add_task', recipientId: 'r-rashid', task: task('Share timetable changes a week ahead', 'academic', 'u-grace', nextWeekday(now, [0], 8), { recurrence: 'weekly', planId: i.planSchool }) }) },
+    { at: 200, by: 'u-grace', label: 'reading', action: (i) => ({ type: 'add_task', recipientId: 'r-rashid', task: task('Collect the reading assessment results', 'academic', 'u-grace', clock(now, 2, 13), { planId: i.planSchool }) }) },
+    { at: 199, by: 'u-grace', action: (i) => ({ type: 'add_task', recipientId: 'r-rashid', task: task('Agree term 2 learning goals with Huda', 'academic', 'u-grace', clock(now, 5, 14), { planId: i.planSchool, dependsOn: [i.reading] }) }) },
+    { at: 260, by: 'u-faisal', action: (i) => ({ type: 'add_task', recipientId: 'r-rashid', task: task('Sit-to-stand practice at home (15 minutes)', 'rehab', 'u-huda', future(now, 18), { recurrence: 'daily', planId: i.planLegs }) }) },
+    { at: 20, by: 'u-faisal', action: { type: 'add_task', recipientId: 'r-rashid', task: task('Short swim twice a week', 'activity', 'u-huda', clock(now, 3, 17), { needsApproval: true, notes: 'Swimming helps with leg strength. Huda to confirm it fits his week.' }) } },
+    { at: 270, by: 'u-faisal', action: (i) => ({ type: 'add_task', recipientId: 'r-khadija', task: task('Evening exercise set', 'rehab', 'u-khadija', future(now, 20), { recurrence: 'daily', planId: i.planKnee }) }) },
+    // Cover and handover
+    { at: 10, by: 'u-aisha', action: { type: 'request_cover', recipientId: 'r-fatima', from: friday, to: friday + 6 * H, reason: 'Annual leave — morning visit and lunch need cover.', domain: 'overview' } },
+    { at: 2, by: 'u-joseph', action: { type: 'create_handover', recipientId: 'r-hamad', toUserId: 'u-khalid', note: 'Brake still not fixed — use the transfer board. He ate well today.', hours: 24 } },
+    // Appointments
+    { at: 87, by: 'u-mariam', action: { type: 'add_appointment', recipientId: 'r-fatima', appt: appt('Eye clinic follow-up', 'medical', 'medical', thursday, 60, 'Al Barsha Eye Clinic', 'Al Barsha, Dubai', ['u-mariam']), prep: ['Bring her glasses and the eye-drop bottle', 'Write down questions about blurred vision', 'Bring the insurance card and Emirates ID'] } },
+    { at: 5, by: 'u-kareem', action: { type: 'add_appointment', recipientId: 'r-fatima', appt: appt('Diabetes review call', 'medical', 'medical', clock(now, 1, 19), 30, 'Dr. Kareem Hassan', 'Phone call', ['u-kareem', 'u-mariam']), prep: [] } },
+    { at: 60, by: 'u-khalid', action: { type: 'add_appointment', recipientId: 'r-hamad', appt: appt('Dialysis session', 'medical', 'medical', dialysis1, 240, 'Mirdif Dialysis Centre', 'Mirdif, Dubai', ['u-joseph']), prep: [] } },
+    { at: 59, by: 'u-khalid', action: { type: 'add_appointment', recipientId: 'r-hamad', appt: appt('Dialysis session', 'medical', 'medical', dialysis2, 240, 'Mirdif Dialysis Centre', 'Mirdif, Dubai', ['u-joseph']), prep: [] } },
+    { at: 120, by: 'u-khalid', label: 'hearing', action: { type: 'add_appointment', recipientId: 'r-hamad', appt: appt('Hearing test', 'medical', 'medical', clock(now, -2, 11), 45, 'Mirdif Audiology', 'Mirdif, Dubai', ['u-khalid']), prep: [] } },
+    { at: 30, by: 'u-khalid', action: (i) => ({ type: 'appointment_status', appointmentId: i.hearing, status: 'missed' }) },
+    { at: 200, by: 'u-salma', action: { type: 'add_appointment', recipientId: 'r-rashid', appt: appt('Therapy session', 'therapy', 'wellbeing', monday, 50, 'Dr. Salma Idris', 'Mind Well Clinic', ['u-salma', 'u-huda']), prep: [] } },
+    { at: 48, by: 'u-grace', action: { type: 'add_appointment', recipientId: 'r-rashid', appt: appt('Term review meeting', 'school', 'academic', clock(now, 3, 14), 45, 'Grace Thomas', 'Al Mizhar Primary School', ['u-grace', 'u-huda']), prep: ['Review the education plan and recent reports', 'Write down questions for the teacher'] } },
+    { at: 47, by: 'u-faisal', action: { type: 'add_appointment', recipientId: 'r-rashid', appt: appt('Physio session', 'physio', 'rehab', clock(now, 2, 17), 45, 'Faisal Nasser', 'Move Well Rehab', ['u-faisal']), prep: [] } },
+    { at: 46, by: 'u-faisal', action: { type: 'add_appointment', recipientId: 'r-khadija', appt: appt('Physio review', 'physio', 'rehab', clock(now, 1, 10), 45, 'Faisal Nasser', 'Move Well Rehab', ['u-faisal', 'u-khadija']), prep: ['Log this week’s exercises and any pain'] } },
+    { at: 140, by: 'u-layla', label: 'xray', action: { type: 'add_appointment', recipientId: 'r-khadija', appt: appt('Knee X-ray', 'medical', 'medical', clock(now, -3, 9), 30, 'Qusais Clinic', 'Al Qusais, Dubai', ['u-layla']), prep: [] } },
+    { at: 60, by: 'u-layla', action: (i) => ({ type: 'appointment_status', appointmentId: i.xray, status: 'completed', outcome: 'Healing as expected.' }) },
+    // Sample documents (synthetic)
+    { at: 120, by: 'u-kareem', action: { type: 'add_document', recipientId: 'r-fatima', domain: 'medical', title: 'HbA1c lab report (synthetic)', description: 'Sample report for the demo.', fileName: 'hba1c-report.pdf', mime: 'application/pdf', size: 0, dataUrl: samplePdf(['SANAD sample lab report (synthetic)', 'Patient: Fatima Al Noor', 'Test: HbA1c', 'Result: 7.4 %', 'This is demo data, not a real result.']) } },
+    { at: 500, by: 'u-grace', action: { type: 'add_document', recipientId: 'r-rashid', domain: 'academic', title: 'IEP summary 2026–27 (synthetic)', description: 'Accommodations agreed with the family.', fileName: 'iep-summary.pdf', mime: 'application/pdf', size: 0, dataUrl: samplePdf(['Individual education plan summary (synthetic)', 'Student: Rashid Al Hammadi, Grade 5', 'Extra time in tests', 'Speech-to-text for long writing', 'Seat near the door; lift pass']) } },
+    { at: 290, by: 'u-faisal', action: { type: 'add_document', recipientId: 'r-khadija', domain: 'rehab', title: 'Home exercise sheet (synthetic)', description: 'Exercises for weeks 4 to 8.', fileName: 'exercise-sheet.pdf', mime: 'application/pdf', size: 0, dataUrl: samplePdf(['Home exercise sheet (synthetic)', 'Straight-leg raises: 3 x 10, twice a day', 'Heel slides: 3 x 10, twice a day', 'Stop if there is sharp pain']) } },
+    // More progress data
+    rec(150, 'u-khadija', 'r-khadija', 'wellbeing', 'checkin', 'How I feel', '', 3),
+    rec(80, 'u-khadija', 'r-khadija', 'wellbeing', 'checkin', 'How I feel', '', 3),
+    rec(200, 'u-huda', 'r-rashid', 'wellbeing', 'checkin', 'Settled week', '', 3),
+    rec(100, 'u-huda', 'r-rashid', 'wellbeing', 'checkin', 'Tired after school', '', 3),
+    rec(200, 'u-huda', 'r-rashid', 'activity', 'activity_log', 'Swimming', '', 30),
+    rec(120, 'u-huda', 'r-rashid', 'activity', 'activity_log', 'Wheelchair basketball', '', 40),
+    rec(170, 'u-aisha', 'r-fatima', 'medical', 'measurement', 'Blood glucose (fasting)', '', 7.4, 'mmol/L'),
+    rec(120, 'u-aisha', 'r-fatima', 'medical', 'measurement', 'Blood glucose (fasting)', '', 7.6, 'mmol/L'),
+  ];
+}
+
 export function createSeed(now = Date.now()): State {
   let state: State = {
     version: 1,
@@ -260,7 +367,7 @@ export function createSeed(now = Date.now()): State {
     playbooks: playbookDefs.map((p) => ({ ...p, steps: [...p.steps], tags: [...p.tags], updatedAt: now - 400 * H })),
     notifications: [],
     settings: { sla: { urgent: 60, high: 240, medium: 1440, low: 4320 }, autoEscalate: true, balanceLoad: true, preferContinuity: true },
-    schema: 2,
+    schema: 3,
     orgs: [
       { id: 'org-hub', name: 'SANAD Care Hub' },
       { id: 'org-noor', name: 'Noor Community Care' },
@@ -273,6 +380,10 @@ export function createSeed(now = Date.now()): State {
     records: [],
     medications: [],
     doseLogs: [],
+    plans: [],
+    tasks: [],
+    appointments: [],
+    documents: [],
   };
   state.users.find((u) => u.id === 'u-sara')!.orgId = 'org-hub';
   let seq = 0;
@@ -287,7 +398,7 @@ export function createSeed(now = Date.now()): State {
   }
   syncLinks(state, now);
   const ids: Record<string, string> = {};
-  for (const step of [...script, ...careScript(now)].sort((a, b) => b.at - a.at)) {
+  for (const step of [...script, ...careScript(now), ...planScript(now)].sort((a, b) => b.at - a.at)) {
     let action = typeof step.action === 'function' ? step.action(ids) : step.action;
     if (action.type === 'toggle_check' && action.itemId === '__first') {
       const c = state.challenges.find((x) => x.id === (action as { id: string }).id);

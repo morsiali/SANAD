@@ -23,7 +23,7 @@ interface Ctx {
   signIn(email: string, password: string): Promise<void>;
   signUp(input: RegisterInput & { password: string }): Promise<void>;
   signOut(): void;
-  act(action: Action, opts?: { quiet?: boolean }): Promise<{ ok: boolean; createdId?: string; message?: string }>;
+  act(action: Action, opts?: { quiet?: boolean; ownConflict?: boolean }): Promise<{ ok: boolean; createdId?: string; message?: string; status?: number; m?: Msg }>;
   refresh(): Promise<void>;
   toast(text: string, tone?: Toast['tone'], m?: Msg): void;
   replaceView(v: View): void;
@@ -147,8 +147,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: true, createdId: r.createdId, message: r.message };
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) signOut();
-        toast((e as Error).message, 'error', (e as ApiError).m);
-        return { ok: false };
+        // A scheduling conflict is shown by the form itself, with a choice to keep both.
+        if (!(opts?.ownConflict && e instanceof ApiError && e.m?.k === 'e_conflict')) toast((e as Error).message, 'error', (e as ApiError).m);
+        return { ok: false, status: (e as ApiError).status, m: (e as ApiError).m };
       }
     },
     [backend, token, toast, signOut],

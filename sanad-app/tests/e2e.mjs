@@ -1,7 +1,7 @@
 // End-to-end walkthrough: drives the real app in Chromium as several people at once.
 // Usage: npm run build && npm run e2e   (set CHROMIUM_PATH to use a specific browser binary)
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -34,7 +34,7 @@ async function person(email, viewport = { width: 1360, height: 900 }) {
   const ctx = await browser.newContext({ viewport, acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => problems.push(`[${email}] page error: ${e.message}`));
-  page.on('console', (m) => m.type() === 'error' && !m.text().includes('fonts.g') && !m.text().includes('status of 401') && problems.push(`[${email}] console: ${m.text()}`));
+  page.on('console', (m) => m.type() === 'error' && !m.text().includes('fonts.g') && !m.text().includes('status of 401') && !m.text().includes('status of 409') && !m.text().includes('status of 400') && problems.push(`[${email}] console: ${m.text()}`));
   page.on('response', (r) => r.url().includes('/api/') && r.status() >= 500 && problems.push(`[${email}] ${r.status()} ${r.url()}`));
   if (email) {
     await page.goto(`${BASE}/signin`);
@@ -626,6 +626,151 @@ await step('organisation admin manages access but sees no records and cannot rep
   await p.context().close();
 });
 
+console.log('\nPlans, appointments, documents and progress');
+await step('Today shows tasks, appointments, medicines, approvals and recent updates', async () => {
+  const p = await person('mariam@sanad.ae');
+  await p.locator('.side-nav a[href="#/app/today"]').click();
+  await p.getByRole('heading', { name: 'Today', level: 1 }).waitFor();
+  for (const h of ['My tasks', 'Appointments today and tomorrow', 'Care activities: medicines today', 'Waiting for approval', 'Recent updates']) await p.getByRole('heading', { name: h }).waitFor();
+  await p.getByText('Not logged means nobody has recorded it yet').waitFor();
+  await p.context().close();
+});
+await step('guardian approves a physiotherapist’s task; it becomes scheduled', async () => {
+  const p = await person('huda@sanad.ae');
+  await go(p, '/app/approvals');
+  const card = p.locator('.approval-card', { hasText: 'Short swim twice a week' });
+  await card.getByRole('button', { name: 'Approve' }).click();
+  await text(p, 'Approved and done');
+  await go(p, '/app/people/r-rashid?tab=plans');
+  await p.locator('.task-row', { hasText: 'Short swim twice a week' }).locator('.task-scheduled').waitFor();
+  await p.context().close();
+});
+await step('dependent task unlocks after the first is completed; evidence is recorded', async () => {
+  const p = await person('huda@sanad.ae');
+  await go(p, '/app/people/r-rashid?tab=plans');
+  await p.locator('.task-row', { hasText: 'Agree term 2 learning goals' }).getByText('Waiting on').waitFor();
+  await p.locator('.task-row').filter({ has: p.locator('.task-title', { hasText: 'Collect the reading assessment results' }) }).locator('.task-main').click();
+  await p.locator('.modal').getByRole('button', { name: 'Complete' }).click();
+  await p.locator('#task-text').fill('Results shared with Huda');
+  await p.locator('.modal').getByRole('button', { name: 'Mark completed' }).click();
+  await text(p, 'Collect the reading assessment results: completed');
+  await p.keyboard.press('Escape');
+  await p.locator('.modal').waitFor({ state: 'detached' });
+  if (await p.locator('.task-row', { hasText: 'Agree term 2 learning goals' }).getByText('Waiting on').count()) throw new Error('should no longer wait');
+  await p.context().close();
+});
+await step('new task with owner and section; someone without the medical section cannot be given medical work', async () => {
+  const p = await person('huda@sanad.ae');
+  await go(p, '/app/people/r-rashid?tab=plans');
+  await p.getByRole('button', { name: 'New task' }).first().click();
+  await p.locator('#task-title').fill('Check the inhaler technique');
+  await p.locator('#task-domain').selectOption('medical');
+  await p.locator('#task-owner').selectOption({ label: 'Faisal Nasser' });
+  await modalBtn(p, 'Schedule task').click();
+  await text(p, 'cannot see this part of the profile');
+  await p.locator('#task-owner').selectOption({ label: 'Huda Al Hammadi' });
+  await modalBtn(p, 'Schedule task').click();
+  await text(p, 'Scheduled: Check the inhaler technique');
+  await p.context().close();
+  const g = await person('faisal@sanad.ae');
+  await go(g, '/app/people/r-rashid?tab=plans');
+  await g.locator('.task-row').first().waitFor();
+  if (await g.getByText('Check the inhaler technique').count()) throw new Error('physiotherapist should not see a medical task');
+  await g.context().close();
+});
+await step('appointment with a preparation checklist; a clash is shown with a choice to keep both', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/people/r-fatima?tab=appointments');
+  const call = await p.locator('.appt', { hasText: 'Diabetes review call' }).first().locator('.small').first().innerText();
+  await p.getByRole('button', { name: 'New appointment' }).click();
+  await p.locator('#appt-title').fill('Podiatry check');
+  // Same time as the diabetes review call Mariam already attends.
+  const start = await p.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(19, 0, 0, 0);
+    const z = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T19:00`;
+  });
+  await p.locator('#appt-start').fill(start);
+  await modalBtn(p, 'Add appointment').click();
+  await p.locator('.modal').getByText('already has “Diabetes review call”').waitFor();
+  await p.locator('.modal').getByRole('button', { name: 'Keep both' }).click();
+  await text(p, 'Appointment added: Podiatry check');
+  const card = p.locator('.appt', { hasText: 'Podiatry check' });
+  await card.getByText(/Preparation \(0 of 4 done\)/).waitFor();
+  await go(p, '/app/calendar');
+  await p.getByText('Clash: Mariam Al Noor also has another commitment at this time').first().waitFor();
+  if (!call) throw new Error('call not found');
+  await p.context().close();
+});
+await step('family member offers to cover a carer’s leave', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/people/r-fatima?tab=plans');
+  await p.locator('.task-row', { hasText: 'Cover needed' }).locator('.task-main').click();
+  await p.locator('.modal').getByRole('button', { name: 'I can cover this' }).click();
+  await text(p, 'you are covering this time');
+  await p.context().close();
+});
+await step('handover: the receiver sees only shared items and acknowledges it', async () => {
+  const p = await person('khalid@sanad.ae');
+  await go(p, '/app/people/r-hamad?tab=plans');
+  await p.locator('.task-row', { hasText: 'Handover from Joseph Mathew' }).locator('.task-main').click();
+  await p.locator('.modal').getByText('Only items you are both allowed to see are included.').waitFor();
+  await p.locator('.modal').getByText('Brake still not fixed').waitFor();
+  await p.locator('.modal').getByRole('button', { name: 'Acknowledge' }).first().click();
+  await p.locator('.modal').getByRole('button', { name: 'Acknowledge' }).last().click();
+  await text(p, 'completed');
+  await p.context().close();
+});
+await step('documents: upload to a section; only people with that section can see and download it', async () => {
+  const file = join(dataDir, 'term-report.pdf');
+  writeFileSync(file, Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n'));
+  const p = await person('huda@sanad.ae');
+  await go(p, '/app/people/r-rashid?tab=documents');
+  await p.getByRole('button', { name: 'Upload a document' }).click();
+  await p.locator('#doc-file').setInputFiles(file);
+  await p.locator('#doc-title').fill('Term report (synthetic)');
+  await p.locator('#doc-domain').selectOption('rehab');
+  await modalBtn(p, 'Upload').click();
+  await text(p, 'Document added: Term report (synthetic)');
+  await p.context().close();
+  const g = await person('faisal@sanad.ae');
+  await go(g, '/app/people/r-rashid?tab=documents');
+  const doc = g.locator('.doc', { hasText: 'Term report (synthetic)' });
+  const [dl] = await Promise.all([g.waitForEvent('download'), doc.getByRole('button', { name: 'Download' }).click()]);
+  if (dl.suggestedFilename() !== 'term-report.pdf') throw new Error(`unexpected file ${dl.suggestedFilename()}`);
+  await g.context().close();
+  const sal = await person('salma@sanad.ae');
+  await go(sal, '/app/people/r-rashid?tab=documents');
+  await sal.getByText('Documents and reports').waitFor();
+  if (await sal.getByText('Term report (synthetic)').count()) throw new Error('psychologist should not see a rehab document');
+  await sal.context().close();
+});
+await step('progress charts with summary, missing data, table view and CSV download', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/people/r-fatima?tab=progress');
+  const card = p.locator('.progress-card', { hasText: 'Blood glucose (fasting)' });
+  await card.getByText(/values recorded\. The first in this period/).waitFor();
+  await card.getByText('What they mean for this person is for their doctor to judge.').waitFor();
+  await card.getByRole('button', { name: 'Show table' }).click();
+  await card.locator('table').waitFor();
+  const [csv] = await Promise.all([p.waitForEvent('download'), p.getByRole('button', { name: 'Download CSV' }).click()]);
+  if (!csv.suggestedFilename().endsWith('.csv')) throw new Error('no csv');
+  await p.context().close();
+});
+await step('calendar is limited to sections each person can see', async () => {
+  const h = await person('huda@sanad.ae');
+  await go(h, '/app/calendar');
+  await h.getByText('Therapy session').first().waitFor();
+  await h.context().close();
+  const g = await person('faisal@sanad.ae');
+  await go(g, '/app/calendar');
+  await g.getByText('Physio session').first().waitFor();
+  if (await g.getByText('Therapy session').count()) throw new Error('physiotherapist should not see therapy appointments');
+  await g.context().close();
+});
+
 console.log('\nWorkflow');
 await step('in-app workflow map shows live counts and step details', async () => {
   const p = await person('sara@sanad.ae');
@@ -675,8 +820,8 @@ const englishLeft = async (page) =>
       if (!r.width && !r.height) continue;
       const typed = /^(Hessa|Ali|Reem|Salem|Saleh|Jumeirah|Dubai)$/; // names and places typed by people who signed up during this run
       if (n.nodeValue.trim() === 'Dialysis on Mondays and Thursdays. Lives alone.') continue; // a care note typed during this run
-      if (['Calm after swimming', 'Sam Coach', 'Swimming coach', 'End of school year', 'Pain after evening set', 'Salem Rashid', 'Weekend relief carer'].some((x) => n.nodeValue.includes(x))) continue; // typed during this run
-      const words = n.nodeValue.split(/[\s·,()“”«»:]+/).filter((x) => /[A-Za-z]{3,}/.test(x) && !typed.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN)$/.test(x));
+      if (['Calm after swimming', 'Check the inhaler technique', 'Podiatry check', 'Results shared with Huda', 'Term report', 'term-report.pdf', 'Sam Coach', 'Swimming coach', 'End of school year', 'Pain after evening set', 'Salem Rashid', 'Weekend relief carer'].some((x) => n.nodeValue.includes(x))) continue; // typed during this run
+      const words = n.nodeValue.split(/[\s·,()“”«»:]+/).map((x) => x.replace(/[.؛،]+$/, '')).filter((x) => /[A-Za-z]{3,}/.test(x) && !typed.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN|PDF|CSV|PNG|JPEG|WebP)$/.test(x));
       if (words.length) out.push(n.nodeValue.trim());
     }
     return out;
@@ -740,9 +885,9 @@ await step('every page reads fully in Arabic (coordinator)', async () => {
 await step('profile sections read fully in Arabic (guardian and psychologist)', async () => {
   const leftovers = [];
   for (const [email, paths] of [
-    ['huda@sanad.ae', ['/app/people', '/app/people/r-rashid', '/app/people/r-rashid?tab=medical', '/app/people/r-rashid?tab=wellbeing', '/app/people/r-rashid?tab=academic', '/app/people/r-rashid?tab=social', '/app/people/r-rashid?tab=activity', '/app/people/r-rashid?tab=rehab', '/app/people/r-rashid?tab=team', '/app/people/r-rashid?tab=history', '/app/approvals']],
+    ['huda@sanad.ae', ['/app/today', '/app/calendar', '/app/people/r-rashid?tab=plans', '/app/people/r-rashid?tab=appointments', '/app/people/r-rashid?tab=documents', '/app/people/r-rashid?tab=progress', '/app/people', '/app/people/r-rashid', '/app/people/r-rashid?tab=medical', '/app/people/r-rashid?tab=wellbeing', '/app/people/r-rashid?tab=academic', '/app/people/r-rashid?tab=social', '/app/people/r-rashid?tab=activity', '/app/people/r-rashid?tab=rehab', '/app/people/r-rashid?tab=team', '/app/people/r-rashid?tab=history', '/app/approvals']],
     ['salma@sanad.ae', ['/app/people/r-rashid?tab=wellbeing']],
-    ['mariam@sanad.ae', ['/app/people/r-fatima?tab=medical', '/app/approvals']],
+    ['mariam@sanad.ae', ['/app/people/r-fatima?tab=medical', '/app/approvals', '/app/today', '/app/people/r-fatima?tab=progress', '/app/people/r-fatima?tab=plans', '/app/people/r-fatima?tab=appointments']],
   ]) {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
     await ctx.addInitScript(() => localStorage.setItem('sanad.lang', 'ar'));

@@ -1,11 +1,13 @@
 // SANAD API: auth, a single command endpoint backed by the shared engine, live updates over SSE.
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { apply, register, sweep, upgrade, viewFor, type RegisterInput } from '../shared/engine';
 import { audit } from '../shared/care-engine';
 import { msg } from '../shared/messages';
+import { domainsFor } from '../shared/access';
+import { DOC_MAX_SERVER, DOC_TYPES, sniffMatches } from '../shared/plans';
 import { createSeed } from '../shared/seed';
 import { EngineError, type Action, type State } from '../shared/types';
 
@@ -57,6 +59,25 @@ export function createApp(opts: AppOptions = {}) {
 
   const rand = () => randomBytes(12).toString('base64url');
 
+  // Uploaded files live next to the data file (or in memory for tests), never inside the shared state.
+  const filesDir = dataFile ? join(dirname(dataFile), 'files') : null;
+  const memFiles = new Map<string, Buffer>();
+  const putFile = (key: string, buf: Buffer) => {
+    if (!filesDir) return void memFiles.set(key, buf);
+    mkdirSync(filesDir, { recursive: true });
+    writeFileSync(join(filesDir, key), buf);
+  };
+  const getFile = (key: string): Buffer | null => {
+    if (!/^[A-Za-z0-9_-]+$/.test(key)) return null;
+    if (!filesDir) return memFiles.get(key) ?? null;
+    const p = join(filesDir, key);
+    return existsSync(p) ? readFileSync(p) : null;
+  };
+  const dropFile = (key: string) => {
+    memFiles.delete(key);
+    if (filesDir && existsSync(join(filesDir, key))) unlinkSync(join(filesDir, key));
+  };
+
   const save = () => {
     if (!dataFile) return;
     mkdirSync(dirname(dataFile), { recursive: true });
@@ -104,6 +125,7 @@ export function createApp(opts: AppOptions = {}) {
   // ---- routes --------------------------------------------------------------
   const app = express();
   app.disable('x-powered-by');
+  app.use('/api/documents', express.json({ limit: '8mb' }));
   app.use(express.json({ limit: '200kb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, mode: 'server', version: db.state.version }));
@@ -182,6 +204,7 @@ export function createApp(opts: AppOptions = {}) {
   app.post('/api/action', auth, (req: AuthedRequest, res) => {
     const action = req.body?.action as Action | undefined;
     if (!action || typeof action !== 'object' || typeof action.type !== 'string') return res.status(400).json({ error: 'Missing action' });
+    if (action.type === 'add_document') delete (action as { fileKey?: string }).fileKey;
     try {
       const result = apply(db.state, req.userId!, action, Date.now(), { rand });
       db.state = result.state;
@@ -194,6 +217,53 @@ export function createApp(opts: AppOptions = {}) {
       console.error(e);
       res.status(500).json({ error: 'Something went wrong on the server. Your change was not saved.' });
     }
+  });
+
+  // Upload: the server checks size and content type, stores the bytes, then records the document through the engine
+  // (which checks the uploader's access). If the engine refuses, the stored file is removed again.
+  app.post('/api/documents', auth, (req: AuthedRequest, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const mime = String(b.mime ?? '');
+    if (!DOC_TYPES[mime]) return res.status(400).json({ error: 'Upload a PDF, PNG, JPEG, WebP or text file.', m: msg('e_doc_type') });
+    const buf = Buffer.from(String(b.dataBase64 ?? ''), 'base64');
+    if (!buf.length || buf.length > DOC_MAX_SERVER) return res.status(400).json({ error: 'File too large', m: msg('e_doc_size', { kb: DOC_MAX_SERVER / 1000 }) });
+    if (!sniffMatches(mime, new Uint8Array(buf))) return res.status(400).json({ error: 'The file content does not match its type.', m: msg('e_doc_type') });
+    const key = rand();
+    putFile(key, buf);
+    try {
+      const result = apply(
+        db.state,
+        req.userId!,
+        { type: 'add_document', recipientId: String(b.recipientId ?? ''), domain: String(b.domain ?? '') as never, title: String(b.title ?? ''), description: String(b.description ?? ''), fileName: String(b.fileName ?? 'file'), mime, size: buf.length, fileKey: key },
+        Date.now(),
+        { rand, serverFile: true },
+      );
+      db.state = result.state;
+      save();
+      broadcast();
+      res.json({ view: viewFor(db.state, req.userId!), message: result.message, m: result.m, createdId: result.createdId });
+    } catch (e) {
+      dropFile(key);
+      if (e instanceof EngineError) return res.status(e.status).json({ error: e.message, m: e.m });
+      console.error(e);
+      res.status(500).json({ error: 'Something went wrong on the server. The file was not saved.' });
+    }
+  });
+
+  // Download: access is checked again for every request, and each opening is recorded in the audit log.
+  app.get('/api/documents/:id', auth, (req: AuthedRequest, res) => {
+    const d = db.state.documents.find((x) => x.id === req.params.id && !x.archived);
+    if (!d || !domainsFor(db.state, req.userId!, d.recipientId, Date.now()).includes(d.domain)) return res.status(404).json({ error: 'That document no longer exists', m: msg('e_document') });
+    const buf = d.storage === 'server' ? getFile(d.fileKey ?? '') : d.dataUrl ? Buffer.from(d.dataUrl.split(',')[1] ?? '', 'base64') : null;
+    if (!buf) return res.status(404).json({ error: 'The file is missing', m: msg('e_document') });
+    audit(db.state, req.userId!, d.recipientId, d.domain, 'doc_viewed', msg('au_doc_viewed', { actor: db.state.users.find((u) => u.id === req.userId)?.name ?? '', title: d.title }), Date.now(), d.id);
+    save();
+    res.setHeader('Content-Type', d.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${d.fileName.replace(/[^\w.\- ]/g, '_')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(buf);
   });
 
   app.post('/api/password', auth, (req: AuthedRequest, res) => {

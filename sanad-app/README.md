@@ -49,7 +49,7 @@ Reported → Routed (rule match → availability → best person, or coordinator
 
 ## Profiles, consent and permissions
 
-See **[docs/PHASE-1.md](docs/PHASE-1.md)** for the audit, the delivery plan, the roles and permissions
+See **[docs/PHASE-1.md](docs/PHASE-1.md)** and **[docs/PHASE-2.md](docs/PHASE-2.md)** (care plans, tasks, appointments, documents, progress charts and the Today view) for the audit, the delivery plan, the roles and permissions
 matrix, the consent and approval rules, test results and known limitations. Copy `.env.example` for the
 server settings.
 
@@ -69,9 +69,9 @@ Settings → Pages → Build and deployment → Source: **GitHub Actions**.
 ## Tests
 
 ```bash
-npm test           # 84 unit + API tests (routing, permissions, consent, approvals, records, medicines, Arabic)
+npm test           # 100 unit + API tests (routing, permissions, consent, approvals, records, medicines, tasks, appointments, documents, Arabic)
 npm run typecheck
-npm run build && npm run e2e   # 64 end-to-end checks in Chromium, several users at once, English and Arabic
+npm run build && npm run e2e   # 74 end-to-end checks in Chromium, several users at once, English and Arabic
 ```
 `npm run e2e` uses Playwright. The first time, run `npx playwright install chromium`.
 

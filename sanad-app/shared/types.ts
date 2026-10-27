@@ -439,6 +439,10 @@ export interface State {
   records: CareRecord[];
   medications: Medication[];
   doseLogs: DoseLog[];
+  plans: CarePlan[];
+  tasks: CareTask[];
+  appointments: Appointment[];
+  documents: CareDocument[];
 }
 
 /** What a signed-in user receives: the state filtered to what they may see. */
@@ -499,7 +503,171 @@ export type Action =
   | { type: 'revoke_member'; membershipId: string; reason: string }
   | { type: 'verify_authority'; membershipId: string; evidence: string }
   | { type: 'decide_approval'; approvalId: string; decision: 'approve' | 'reject'; fingerprint: string }
+  // plans, tasks, appointments, documents
+  | { type: 'add_plan'; recipientId: string; title: string; goal: string; domain: Domain }
+  | { type: 'update_plan'; planId: string; title: string; goal: string; status: CarePlan['status'] }
+  | { type: 'add_task'; recipientId: string; task: TaskInput; draft?: boolean; allowConflict?: boolean }
+  | { type: 'edit_task'; taskId: string; baseVersion: number; task: TaskInput; allowConflict?: boolean }
+  | { type: 'submit_task'; taskId: string }
+  | { type: 'schedule_task'; taskId: string; baseVersion: number }
+  | { type: 'task_status'; taskId: string; status: 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'failed' | 'resume'; reason?: string; evidence?: string; evidenceDocId?: string }
+  | { type: 'task_comment'; taskId: string; text: string }
+  | { type: 'create_handover'; recipientId: string; toUserId: string; note: string; hours: number }
+  | { type: 'request_cover'; recipientId: string; from: number; to: number; reason: string; domain: Domain }
+  | { type: 'offer_cover'; taskId: string; allowConflict?: boolean }
+  | { type: 'add_appointment'; recipientId: string; appt: AppointmentInput; prep: string[]; allowConflict?: boolean }
+  | { type: 'edit_appointment'; appointmentId: string; baseVersion: number; appt: AppointmentInput; allowConflict?: boolean }
+  | { type: 'appointment_status'; appointmentId: string; status: 'completed' | 'cancelled' | 'missed'; outcome?: string }
+  | { type: 'add_document'; recipientId: string; domain: Domain; title: string; description: string; fileName: string; mime: string; size: number; dataUrl?: string; fileKey?: string }
+  | { type: 'archive_document'; documentId: string; reason: string }
+  | { type: 'note_export'; recipientId: string; what: 'progress' }
   | { type: 'cancel_approval'; approvalId: string };
+
+// ---------------------------------------------------------------- plans, tasks, appointments, documents
+
+export type TaskStatus = 'draft' | 'awaiting_approval' | 'scheduled' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'failed';
+export type Recurrence = 'none' | 'daily' | 'weekly' | 'monthly';
+export type TaskKind = 'task' | 'prep' | 'handover' | 'coverage';
+
+export interface CarePlan {
+  id: string;
+  recipientId: string;
+  title: string;
+  goal: string;
+  /** Who can see the plan and its tasks. */
+  domain: Domain;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'active' | 'completed' | 'archived';
+}
+
+export interface TaskEvent {
+  at: number;
+  by: string;
+  m: Msg;
+}
+
+export interface HandoverItem {
+  type: 'task' | 'record' | 'dose' | 'problem' | 'appointment';
+  id: string;
+  title: string;
+  at: number;
+  state: string;
+}
+
+export interface CareTask {
+  id: string;
+  recipientId: string;
+  planId: string | null;
+  /** Subtask of another task (e.g. a preparation step). */
+  parentId: string | null;
+  appointmentId: string | null;
+  kind: TaskKind;
+  title: string;
+  notes: string;
+  domain: Domain;
+  ownerId: string | null;
+  status: TaskStatus;
+  /** Status to return to when unblocked. */
+  resumeStatus?: TaskStatus;
+  priority: Priority;
+  dueAt: number | null;
+  recurrence: Recurrence;
+  seriesId: string;
+  dependsOn: string[];
+  /** Ask a verified guardian (or the person) before it is scheduled. */
+  needsApproval: boolean;
+  approvalId?: string;
+  evidenceRequired: boolean;
+  evidence?: string;
+  evidenceDocId?: string;
+  statusReason?: string;
+  comments: Comment[];
+  events: TaskEvent[];
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  version: number;
+  remindedAt?: number;
+  escalatedAt?: number;
+  /** Cover requests: the time to cover. */
+  coverFrom?: number;
+  coverTo?: number;
+  /** Handovers: what was passed on, limited to what both people may see. */
+  handover?: { fromId: string; items: HandoverItem[] };
+}
+
+export type AppointmentKind = 'medical' | 'therapy' | 'physio' | 'school' | 'activity' | 'other';
+
+export interface Appointment {
+  id: string;
+  recipientId: string;
+  title: string;
+  kind: AppointmentKind;
+  domain: Domain;
+  startAt: number;
+  endAt: number;
+  location: string;
+  withWhom: string;
+  /** Care-team members attending (used for conflict checks). */
+  attendeeIds: string[];
+  notes: string;
+  status: 'scheduled' | 'completed' | 'cancelled' | 'missed';
+  outcome?: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+}
+
+export interface CareDocument {
+  id: string;
+  recipientId: string;
+  domain: Domain;
+  title: string;
+  description: string;
+  fileName: string;
+  mime: string;
+  size: number;
+  /** inline: kept in the data (browser demo, small files). server: stored as a file, fetched through an authorised endpoint. */
+  storage: 'inline' | 'server';
+  dataUrl?: string;
+  /** Server storage key (never chosen by the client). */
+  fileKey?: string;
+  uploadedBy: string;
+  uploadedAt: number;
+  source: RecordSource;
+  archived?: boolean;
+}
+
+export interface TaskInput {
+  title: string;
+  notes: string;
+  domain: Domain;
+  ownerId: string | null;
+  priority: Priority;
+  dueAt: number | null;
+  recurrence: Recurrence;
+  dependsOn: string[];
+  needsApproval: boolean;
+  evidenceRequired: boolean;
+  planId: string | null;
+  parentId?: string | null;
+}
+
+export interface AppointmentInput {
+  title: string;
+  kind: AppointmentKind;
+  domain: Domain;
+  startAt: number;
+  endAt: number;
+  location: string;
+  withWhom: string;
+  attendeeIds: string[];
+  notes: string;
+}
 
 export interface MedicationInput {
   name: string;

@@ -5,7 +5,8 @@ import { apply, register, sweep, upgrade, viewFor, type RegisterInput } from '..
 import { audit } from '../../shared/care-engine';
 import { msg } from '../../shared/messages';
 import { createSeed } from '../../shared/seed';
-import type { Action, Msg, Role, State, View } from '../../shared/types';
+import type { Action, Domain, Msg, Role, State, View } from '../../shared/types';
+import { domainsFor } from '../../shared/access';
 
 export interface InviteInfo {
   role: Role;
@@ -60,6 +61,19 @@ export interface Backend {
   reset(token: string): Promise<ActResult>;
   exportData(token: string): Promise<unknown>;
   inviteInfo(code: string): Promise<InviteInfo | null>;
+  uploadDocument(token: string, input: UploadInput): Promise<ActResult>;
+  /** Fetches a document's file after a fresh permission check. */
+  openDocument(token: string, documentId: string): Promise<Blob>;
+}
+
+export interface UploadInput {
+  recipientId: string;
+  domain: Domain;
+  title: string;
+  description: string;
+  fileName: string;
+  mime: string;
+  dataBase64: string;
 }
 
 export class ApiError extends Error {
@@ -104,6 +118,15 @@ function serverBackend(): Backend {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;
       }
+    },
+    uploadDocument: (token, input) => call('/api/documents', { method: 'POST', token, body: JSON.stringify(input) }),
+    async openDocument(token, id) {
+      const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(body.error ?? 'The document could not be opened', res.status, body.m);
+      }
+      return res.blob();
     },
     subscribe(token, onChange) {
       let es: EventSource | null = null;
@@ -276,6 +299,18 @@ function browserBackend(): Backend {
       return viewFor(s, me);
     },
     inviteInfo: async (code) => inviteInfoOf(read(), code),
+    async uploadDocument(token, input) {
+      return this.act(token, { type: 'add_document', recipientId: input.recipientId, domain: input.domain, title: input.title, description: input.description, fileName: input.fileName, mime: input.mime, size: 0, dataUrl: `data:${input.mime};base64,${input.dataBase64}` });
+    },
+    async openDocument(token, id) {
+      const me = userFromToken(token);
+      const s = read();
+      const d = s.documents.find((x) => x.id === id && !x.archived);
+      if (!d || !d.dataUrl || !domainsFor(s, me, d.recipientId).includes(d.domain)) throw new ApiError('That document no longer exists', 404, msg('e_document'));
+      audit(s, me, d.recipientId, d.domain, 'doc_viewed', msg('au_doc_viewed', { actor: s.users.find((u) => u.id === me)?.name ?? '', title: d.title }), Date.now(), d.id);
+      write(s, false);
+      return (await fetch(d.dataUrl)).blob();
+    },
   };
 }
 
