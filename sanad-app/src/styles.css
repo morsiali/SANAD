@@ -1137,3 +1137,23 @@ a.cite:hover, a.cite:focus-visible { background: var(--blue); color: #fff; }
 @media (prefers-reduced-motion: reduce) { .assist-panel, .assist-fab { transition: none; } }
 .assist-sugg .chip, .assist-start .chip { display: inline-flex; align-items: center; gap: 6px; text-align: start; }
 .assist-sugg .link { color: var(--blue-ink); }
+
+/* monitoring, proposals, standing permissions, forecast */
+.mon-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.mon { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.mon-warn, .mon-dose_unlogged, .mon-refill_due, .mon-cover_unfilled { border-color: #f1d9a6; background: #fffaf0; }
+.mon-ico { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--mist); flex: none; }
+.mon-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mon-main > a { font-weight: 700; }
+.mon-main > a:hover { text-decoration: underline; }
+.standing-form { display: flex; flex-direction: column; gap: 8px; background: var(--mist); border-radius: 10px; padding: 10px; margin-top: 6px; }
+.standing-form input[type='number'] { max-width: 120px; }
+.note-held { color: var(--muted); font-style: normal; font-size: 12.5px; }
+.note-urgent { color: var(--red); font-style: normal; font-weight: 700; font-size: 12.5px; }
+.settings-more { margin-top: 16px; }
+fieldset.plain { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.channels ul { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 4px; }
+.filters { margin-bottom: 14px; }
+.filters select { width: auto; }
+.content { padding-bottom: 96px; }
+.mon-main > .link, .mon-main .link { align-self: flex-start; }

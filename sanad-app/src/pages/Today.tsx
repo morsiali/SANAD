@@ -10,6 +10,7 @@ import { myPeople } from '../lib/people';
 import { Empty, Icon } from '../components/ui';
 import { TaskModal, TaskRow } from '../components/tasks';
 import { AppointmentCard, AppointmentModal } from '../components/appointments';
+import { AlertsPanel, ProposalsPanel } from '../components/monitoring';
 
 /** One place for what needs doing today, across everyone this person can see. */
 export function Today() {
@@ -142,6 +143,8 @@ export function Today() {
         </div>
 
         <div className="col-side">
+          {me.role !== 'admin' && <AlertsPanel />}
+          {me.role !== 'admin' && <ProposalsPanel />}
           <section className="panel" aria-labelledby="t-approve">
             <header className="panel-head">
               <h2 id="t-approve">{t('Waiting for approval')}</h2>

@@ -24,8 +24,8 @@ modes (server and browser demo). Nothing here is described as done unless it wor
 | 1 | Access control, consent, approvals, audit, people dashboard, profile, medical record & medicines, other domain records | **Done (this report)** |
 | 2 | Appointments & calendar, care plans and tasks (states, recurrence, owners, handovers), documents and uploads, progress charts, “Today” view | **Done — see [PHASE-2.md](PHASE-2.md)** |
 | 3 | Assistant: permission-scoped retrieval with cited sources, appointment briefs, handovers, draft plans, approval cards | Done ([report](PHASE-3.md)) |
-| 4 | Approved execution, notification preferences and quiet hours, background monitoring, refill/coverage forecasting rules | Next |
-| 5 | Security hardening, accessibility review (text size, reduced motion), monitoring, deployment readiness | Planned |
+| 4 | Approved execution, notification preferences and quiet hours, background monitoring, refill/coverage forecasting rules | Done ([report](PHASE-4.md)) |
+| 5 | Security hardening, accessibility review (text size, reduced motion), monitoring, deployment readiness | Next |
 
 ## 3. What Phase 1 implemented
 

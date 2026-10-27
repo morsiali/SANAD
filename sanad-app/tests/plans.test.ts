@@ -212,7 +212,7 @@ describe('upgrade', () => {
     delete (old as Partial<State>).tasks;
     delete (old as Partial<State>).appointments;
     const up = upgrade(old, NOW);
-    expect(up.schema).toBe(3);
+    expect(up.schema).toBe(4);
     expect(up.tasks).toEqual([]);
     expect(up.appointments).toEqual([]);
     expect(up.records.length).toBe(s.records.length);

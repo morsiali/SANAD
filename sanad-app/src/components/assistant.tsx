@@ -448,10 +448,10 @@ function StepRunner({ steps, onFinished, confirmLabel, disabled }: { steps: Draf
 
 function PlanDraftEditor({ d }: { d: PlanDraft }) {
   const { view } = useSession();
-  const [title, setTitle] = useState(t(d.title));
-  const [goal, setGoal] = useState(t(d.goal));
+  const [title, setTitle] = useState(tc(d.title));
+  const [goal, setGoal] = useState(tc(d.goal));
   const [domain, setDomain] = useState<Domain>(d.domain);
-  const [tasks, setTasks] = useState<DraftTask[]>(() => d.tasks.map((x) => ({ ...x, title: t(x.title), notes: t(x.notes) })));
+  const [tasks, setTasks] = useState<DraftTask[]>(() => d.tasks.map((x) => ({ ...x, title: tc(x.title), notes: tc(x.notes) })));
   const [locked, setLocked] = useState(false);
   const [done, setDone] = useState(false);
   const steps = useMemo(() => draftSteps(d, { plan: { title, goal, domain, tasks } }), [d, title, goal, domain, tasks]);

@@ -5,6 +5,7 @@ import { useSession } from '../lib/store';
 import { downloadJson } from '../lib/format';
 import { useLanguage } from '../lib/lang';
 import { Avatar, Field, Icon, Modal } from '../components/ui';
+import { NotifySettings } from '../components/monitoring';
 
 export function SettingsPage() {
   const { me, act, backend, token, toast, replaceView, signOut } = useSession();
@@ -174,6 +175,11 @@ export function SettingsPage() {
           </section>
         </div>
       </div>
+      {me.role !== 'admin' && (
+        <div className="cols cols-even settings-more">
+          <NotifySettings />
+        </div>
+      )}
       {confirmReset && (
         <Modal
           title="Reset the demo workspace?"

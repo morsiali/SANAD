@@ -897,6 +897,70 @@ await step('assistant on a phone: full-width panel, no sideways scrolling', asyn
   await p.context().close();
 });
 
+console.log('\nMonitoring, standing permissions and notifications');
+await step('Today shows what SANAD is watching, with the rule behind each item', async () => {
+  const p = await person('khadija@sanad.ae');
+  await go(p, '/app/today');
+  const panel = p.locator('section', { has: p.getByRole('heading', { name: 'SANAD is keeping an eye on' }) });
+  await panel.getByText('about 3.3 days of supply left').first().waitFor();
+  await panel.getByRole('button', { name: 'Why am I seeing this?' }).first().click();
+  await panel.locator('.assist-why').first().waitFor();
+  await p.context().close();
+});
+await step('a suggested new time is accepted by the task’s creator and only the time changes', async () => {
+  const p = await person('faisal@sanad.ae');
+  await go(p, '/app/people/r-khadija?tab=plans');
+  await p.getByText('Move “Morning knee stretches” from 08:00 to 11:30?').waitFor();
+  await btn(p, 'Move to 11:30').click();
+  await text(p, 'now starts at 11:30');
+  if (await p.getByText('Move “Morning knee stretches” from 08:00 to 11:30?').count()) throw new Error('suggestion still shown');
+  await p.context().close();
+});
+await step('a guardian turns on a standing permission; the giver and use count are shown', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/people/r-fatima?tab=team');
+  const sp = p.locator('section', { has: p.getByRole('heading', { name: 'Standing permissions' }) });
+  await sp.getByText('Follow-up when an appointment outcome is missing').waitFor();
+  await sp.getByText(/On — given by Mariam Al Noor/).first().waitFor();
+  await sp.getByRole('button', { name: 'Turn on…' }).first().click();
+  await sp.getByLabel('Who gets the refill tasks').selectOption({ label: 'Aisha Rahman · Caregiver' });
+  await sp.getByRole('button', { name: 'Allow' }).click();
+  await text(p, 'Standing permission saved');
+  if ((await sp.getByText(/On — given by Mariam Al Noor/).count()) < 2) throw new Error('not turned on');
+  await sp.getByText('What SANAD never does on its own').click();
+  await sp.getByText('Change, start or stop a medicine or a dose').waitFor();
+  await p.context().close();
+});
+await step('a caregiver sees standing permissions are not theirs to change', async () => {
+  const p = await person('aisha@sanad.ae');
+  await go(p, '/app/people/r-fatima');
+  if (await p.getByRole('tab', { name: 'Care team & permissions' }).count()) throw new Error('caregiver sees team tab');
+  await p.context().close();
+});
+await step('quiet hours are saved; email and SMS are honestly shown as not connected', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/settings');
+  await p.getByLabel('Quiet hours: keep routine notifications silent').check();
+  await p.getByLabel('From').fill('21:30');
+  await btn(p, 'Save notification settings').click();
+  await text(p, 'Notification settings saved');
+  await p.getByText('Email, SMS and WhatsApp: not available').waitFor();
+  await p.context().close();
+});
+await step('“Coming up” lists refills with the rule, and a coordinator sees no medicines', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/forecast');
+  await p.getByText(/Metformin for Fatima Al Noor runs out around/).waitFor();
+  await p.getByRole('button', { name: 'How is this worked out?' }).first().click();
+  await p.locator('.assist-why').first().waitFor();
+  await p.context().close();
+  const c = await person('sara@sanad.ae');
+  await go(c, '/app/forecast');
+  await c.getByRole('heading', { name: 'Coming up' }).waitFor();
+  if (await c.getByText(/runs out around/).count()) throw new Error('coordinator sees medicine supply');
+  await c.context().close();
+});
+
 console.log('\nArabic');
 const englishLeft = async (page) =>
   page.evaluate(() => {
@@ -977,7 +1041,8 @@ await step('profile sections read fully in Arabic (guardian and psychologist)', 
   for (const [email, paths] of [
     ['huda@sanad.ae', ['/app/today', '/app/calendar', '/app/people/r-rashid?tab=plans', '/app/people/r-rashid?tab=appointments', '/app/people/r-rashid?tab=documents', '/app/people/r-rashid?tab=progress', '/app/people', '/app/people/r-rashid', '/app/people/r-rashid?tab=medical', '/app/people/r-rashid?tab=wellbeing', '/app/people/r-rashid?tab=academic', '/app/people/r-rashid?tab=social', '/app/people/r-rashid?tab=activity', '/app/people/r-rashid?tab=rehab', '/app/people/r-rashid?tab=team', '/app/people/r-rashid?tab=history', '/app/approvals']],
     ['salma@sanad.ae', ['/app/people/r-rashid?tab=wellbeing']],
-    ['mariam@sanad.ae', ['/app/people/r-fatima?tab=medical', '/app/approvals', '/app/today', '/app/people/r-fatima?tab=progress', '/app/people/r-fatima?tab=plans', '/app/people/r-fatima?tab=appointments']],
+    ['mariam@sanad.ae', ['/app/people/r-fatima?tab=medical', '/app/approvals', '/app/today', '/app/people/r-fatima?tab=progress', '/app/people/r-fatima?tab=plans', '/app/people/r-fatima?tab=appointments', '/app/people/r-fatima?tab=team', '/app/forecast', '/app/settings', '/app/inbox']],
+    ['khadija@sanad.ae', ['/app/today', '/app/people/r-khadija?tab=plans']],
   ]) {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
     await ctx.addInitScript(() => localStorage.setItem('sanad.lang', 'ar'));
@@ -1016,7 +1081,7 @@ await step('assistant answers fully in Arabic', async () => {
   await p.locator('.assist-panel').getByText('هذا ما سُجّل لـأم مريم').waitFor();
   await p.locator('.assist-panel summary').first().click();
   await go(p, '/app/people/r-fatima?tab=appointments');
-  await p.locator('.appt').first().getByRole('button', { name: 'حضّر ملخصًا' }).click();
+  await p.getByRole('button', { name: 'حضّر ملخصًا' }).first().click();
   await p.locator('.assist-panel .answer').nth(1).waitFor();
   await p.waitForTimeout(300);
   const left = (await englishLeft(p)).filter((x) => !/^Umm Mariam$/.test(x));

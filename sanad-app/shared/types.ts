@@ -93,6 +93,22 @@ export interface User {
   recipients: string[];
   /** Organisation for staff (coordinators and admins only act inside their own organisation). */
   orgId?: string | null;
+  /** How and when this person wants to be notified. */
+  prefs?: NotifyPrefs;
+}
+
+/** Notification preferences. Only the in-app channel exists today; others are shown as not configured. */
+export interface NotifyPrefs {
+  /** IANA time zone used for quiet hours, e.g. "Asia/Dubai". */
+  tz: string;
+  quiet: boolean;
+  /** "HH:MM" local time. */
+  quietFrom: string;
+  quietTo: string;
+  /** Urgent items (escalations, urgent problems, safety monitoring) still arrive during quiet hours. */
+  urgentThrough: boolean;
+  /** Kinds of routine updates the person chose not to receive. Safety-related items cannot be muted. */
+  muted: ('reminders' | 'updates' | 'monitoring')[];
 }
 
 export interface Recipient {
@@ -408,6 +424,11 @@ export interface Notification {
   read: boolean;
   m?: Msg;
   kind: 'assigned' | 'update' | 'escalation' | 'resolved' | 'comment' | 'system';
+  /** Arrived during quiet hours: kept silently until this time. */
+  heldUntil?: number;
+  urgent?: boolean;
+  /** Where the item can be opened in the app. */
+  link?: string;
 }
 
 export interface Settings {
@@ -443,6 +464,74 @@ export interface State {
   tasks: CareTask[];
   appointments: Appointment[];
   documents: CareDocument[];
+  alerts: MonitorAlert[];
+  standing: StandingPermission[];
+  proposals: Proposal[];
+}
+
+// ---------------------------------------------------------------- monitoring, standing permissions, adaptation
+
+export type AlertKind = 'dose_unlogged' | 'refill_due' | 'cover_unfilled' | 'appt_no_outcome' | 'approval_expiring';
+
+/** Something the background monitor noticed. Stays open until the condition clears; never repeats a notification. */
+export interface MonitorAlert {
+  id: string;
+  key: string;
+  kind: AlertKind;
+  recipientId: string;
+  domain: Domain;
+  m: Msg;
+  /** The rule that produced it, in plain words. */
+  why: Msg;
+  targetId?: string;
+  link: string;
+  firstAt: number;
+  lastAt: number;
+  resolvedAt?: number;
+  notified: string[];
+  /** When set, only these people see the alert (e.g. the approvers of a request). */
+  audience?: string[];
+  /** What SANAD did on its own under a standing permission, and whether it worked. */
+  auto?: { permissionId: string; ok: boolean; createdId?: string; m: Msg };
+}
+
+export type StandingKind = 'refill_task' | 'outcome_task';
+
+/**
+ * A standing permission given by the person or their verified guardian: SANAD may do one specific,
+ * low-risk thing on its own, acting with the giver's own permissions. Expires and can be withdrawn.
+ */
+export interface StandingPermission {
+  id: string;
+  recipientId: string;
+  kind: StandingKind;
+  grantedBy: string;
+  /** Who receives the tasks SANAD creates (refills); outcome tasks go to whoever booked the appointment. */
+  ownerId: string | null;
+  createdAt: number;
+  expiresAt: number;
+  revokedAt?: number;
+  revokedBy?: string;
+  uses: number;
+}
+
+/** A suggested change to how recurring work is scheduled. Only timing is ever proposed; a person decides. */
+export interface Proposal {
+  id: string;
+  key: string;
+  kind: 'reschedule';
+  recipientId: string;
+  domain: Domain;
+  seriesId: string;
+  taskId: string;
+  evidence: string[];
+  fromTime: string;
+  toTime: string;
+  why: Msg;
+  status: 'open' | 'accepted' | 'dismissed' | 'expired';
+  createdAt: number;
+  decidedBy?: string;
+  decidedAt?: number;
 }
 
 /** What a signed-in user receives: the state filtered to what they may see. */
@@ -521,7 +610,12 @@ export type Action =
   | { type: 'add_document'; recipientId: string; domain: Domain; title: string; description: string; fileName: string; mime: string; size: number; dataUrl?: string; fileKey?: string; aiDraft?: boolean }
   | { type: 'archive_document'; documentId: string; reason: string }
   | { type: 'note_export'; recipientId: string; what: 'progress' }
-  | { type: 'cancel_approval'; approvalId: string };
+  | { type: 'cancel_approval'; approvalId: string }
+  // notifications, standing permissions, adaptation
+  | { type: 'update_notify_prefs'; prefs: NotifyPrefs }
+  | { type: 'grant_standing'; recipientId: string; kind: StandingKind; ownerId: string | null; days: number }
+  | { type: 'revoke_standing'; permissionId: string }
+  | { type: 'decide_proposal'; proposalId: string; decision: 'accept' | 'dismiss' };
 
 // ---------------------------------------------------------------- plans, tasks, appointments, documents
 

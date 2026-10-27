@@ -44,7 +44,7 @@ export function canSeeTask(state: State, userId: string, t: CareTask, now = Date
   return can(state, userId, t.recipientId, t.domain, now);
 }
 
-const canManage = (state: State, me: User, t: { createdBy: string; recipientId: string; ownerId?: string | null }, now: number) => {
+export const canManage = (state: State, me: User, t: { createdBy: string; recipientId: string; ownerId?: string | null }, now: number) => {
   if (t.createdBy === me.id || t.ownerId === me.id || hasAuthority(state, me.id, t.recipientId, now)) return true;
   const r = state.recipients.find((x) => x.id === t.recipientId);
   return me.role === 'coordinator' && !!r && r.orgId === me.orgId;
@@ -632,7 +632,7 @@ export function sweepPlans(state: State, now: number): boolean {
     if (!r) continue;
     if (!t.remindedAt && t.ownerId && t.dueAt > now && t.dueAt - now <= REMIND_BEFORE_HOURS * H) {
       t.remindedAt = now;
-      notify(state, [t.ownerId].filter((id) => canSeeTask(state, id, t, now)), null, msg('n_task_due', { title: t.title, recipient: r.name, when: fmtTime(t.dueAt) }), 'update', now);
+      notify(state, [t.ownerId].filter((id) => canSeeTask(state, id, t, now)), null, msg('n_task_due', { title: t.title, recipient: r.name, when: fmtTime(t.dueAt) }), 'update', now, undefined, { group: 'reminders', link: `/app/people/${r.id}?tab=plans` });
       changed = true;
     }
     if (!t.escalatedAt && now > t.dueAt + ESCALATE_AFTER_HOURS[t.priority] * H) {
@@ -640,7 +640,7 @@ export function sweepPlans(state: State, now: number): boolean {
       t.events.push({ at: now, by: 'system', m: msg('ev_task_escalated') });
       const coords = coordinators(state).filter((id) => state.users.find((u) => u.id === id)?.orgId === r.orgId);
       const who = [t.ownerId, t.createdBy, ...authorityHolders(state, r.id, now).map((m) => m.userId), ...coords].filter((id): id is string => !!id && canSeeTask(state, id, t, now));
-      notify(state, who, null, msg('n_task_overdue', { title: t.title, recipient: r.name }), 'escalation', now);
+      notify(state, who, null, msg('n_task_overdue', { title: t.title, recipient: r.name }), 'escalation', now, undefined, { link: `/app/people/${r.id}?tab=plans` });
       audit(state, 'system', r.id, t.domain, 'task_escalated', msg('au_task_escalated', { title: t.title }), now, t.id);
       changed = true;
     }

@@ -84,7 +84,7 @@ const playbookDefs: Omit<Playbook, 'updatedAt'>[] = [
 interface Step {
   at: number; // hours ago
   by: string;
-  action: Action | ((ids: Record<string, string>) => Action);
+  action: Action | ((ids: Record<string, string>, state: State) => Action);
   label?: string;
 }
 
@@ -318,6 +318,17 @@ function planScript(now: number): Step[] {
     { at: 260, by: 'u-faisal', action: (i) => ({ type: 'add_task', recipientId: 'r-rashid', task: task('Sit-to-stand practice at home (15 minutes)', 'rehab', 'u-huda', future(now, 18), { recurrence: 'daily', planId: i.planLegs }) }) },
     { at: 20, by: 'u-faisal', action: { type: 'add_task', recipientId: 'r-rashid', task: task('Short swim twice a week', 'activity', 'u-huda', clock(now, 3, 17), { needsApproval: true, notes: 'Swimming helps with leg strength. Huda to confirm it fits his week.' }) } },
     { at: 270, by: 'u-faisal', action: (i) => ({ type: 'add_task', recipientId: 'r-khadija', task: task('Evening exercise set', 'rehab', 'u-khadija', future(now, 20), { recurrence: 'daily', planId: i.planKnee }) }) },
+    // A daily task that keeps being done late (SANAD proposes a better time; a person decides).
+    { at: (now - clock(now, -6, 9)) / H, by: 'u-faisal', label: 'stretch', action: (i) => ({ type: 'add_task', recipientId: 'r-khadija', task: task('Morning knee stretches', 'rehab', 'u-khadija', clock(now, -5, 8), { recurrence: 'daily', planId: i.planKnee }) }) },
+    ...[
+      [-5, 11, 30],
+      [-4, 11, 15],
+      [-3, 11, 45],
+    ].map(([d, hh, mm]) => ({ at: (now - clock(now, d, hh, mm)) / H, by: 'u-khadija', action: (i: Record<string, string>, st: State): Action => ({ type: 'task_status', taskId: st.tasks.find((t) => t.seriesId === i.stretch && t.status === 'scheduled')!.id, status: 'completed' }) })),
+    { at: 80, by: 'u-mariam', action: { type: 'add_appointment', recipientId: 'r-fatima', appt: appt('Foot care check', 'other', 'overview', clock(now, -2, 10), 30, 'Community nurse', 'Home visit', ['u-mariam']), prep: [] } },
+    // Standing permissions: the person (or guardian) lets SANAD create a follow-up task when an appointment ends without a recorded outcome.
+    { at: 200, by: 'u-khadija', action: { type: 'grant_standing', recipientId: 'r-khadija', kind: 'outcome_task', ownerId: null, days: 90 } },
+    { at: 150, by: 'u-mariam', action: { type: 'grant_standing', recipientId: 'r-fatima', kind: 'outcome_task', ownerId: null, days: 90 } },
     // Cover and handover
     { at: 10, by: 'u-aisha', action: { type: 'request_cover', recipientId: 'r-fatima', from: friday, to: friday + 6 * H, reason: 'Annual leave — morning visit and lunch need cover.', domain: 'overview' } },
     { at: 2, by: 'u-joseph', action: { type: 'create_handover', recipientId: 'r-hamad', toUserId: 'u-khalid', note: 'Brake still not fixed — use the transfer board. He ate well today.', hours: 24 } },
@@ -333,7 +344,7 @@ function planScript(now: number): Step[] {
     { at: 47, by: 'u-faisal', action: { type: 'add_appointment', recipientId: 'r-rashid', appt: appt('Physio session', 'physio', 'rehab', clock(now, 2, 17), 45, 'Faisal Nasser', 'Move Well Rehab', ['u-faisal']), prep: [] } },
     { at: 46, by: 'u-faisal', action: { type: 'add_appointment', recipientId: 'r-khadija', appt: appt('Physio review', 'physio', 'rehab', clock(now, 1, 10), 45, 'Faisal Nasser', 'Move Well Rehab', ['u-faisal', 'u-khadija']), prep: ['Log this week’s exercises and any pain'] } },
     { at: 140, by: 'u-layla', label: 'xray', action: { type: 'add_appointment', recipientId: 'r-khadija', appt: appt('Knee X-ray', 'medical', 'medical', clock(now, -3, 9), 30, 'Qusais Clinic', 'Al Qusais, Dubai', ['u-layla']), prep: [] } },
-    { at: 60, by: 'u-layla', action: (i) => ({ type: 'appointment_status', appointmentId: i.xray, status: 'completed', outcome: 'Healing as expected.' }) },
+    { at: 66, by: 'u-layla', action: (i) => ({ type: 'appointment_status', appointmentId: i.xray, status: 'completed', outcome: 'Healing as expected.' }) },
     // Sample documents (synthetic)
     { at: 120, by: 'u-kareem', action: { type: 'add_document', recipientId: 'r-fatima', domain: 'medical', title: 'HbA1c lab report (synthetic)', description: 'Sample report for the demo.', fileName: 'hba1c-report.pdf', mime: 'application/pdf', size: 0, dataUrl: samplePdf(['SANAD sample lab report (synthetic)', 'Patient: Fatima Al Noor', 'Test: HbA1c', 'Result: 7.4 %', 'This is demo data, not a real result.']) } },
     { at: 500, by: 'u-grace', action: { type: 'add_document', recipientId: 'r-rashid', domain: 'academic', title: 'IEP summary 2026–27 (synthetic)', description: 'Accommodations agreed with the family.', fileName: 'iep-summary.pdf', mime: 'application/pdf', size: 0, dataUrl: samplePdf(['Individual education plan summary (synthetic)', 'Student: Rashid Al Hammadi, Grade 5', 'Extra time in tests', 'Speech-to-text for long writing', 'Seat near the door; lift pass']) } },
@@ -367,7 +378,7 @@ export function createSeed(now = Date.now()): State {
     playbooks: playbookDefs.map((p) => ({ ...p, steps: [...p.steps], tags: [...p.tags], updatedAt: now - 400 * H })),
     notifications: [],
     settings: { sla: { urgent: 60, high: 240, medium: 1440, low: 4320 }, autoEscalate: true, balanceLoad: true, preferContinuity: true },
-    schema: 3,
+    schema: 4,
     orgs: [
       { id: 'org-hub', name: 'SANAD Care Hub' },
       { id: 'org-noor', name: 'Noor Community Care' },
@@ -384,6 +395,9 @@ export function createSeed(now = Date.now()): State {
     tasks: [],
     appointments: [],
     documents: [],
+    alerts: [],
+    standing: [],
+    proposals: [],
   };
   state.users.find((u) => u.id === 'u-sara')!.orgId = 'org-hub';
   let seq = 0;
@@ -399,7 +413,7 @@ export function createSeed(now = Date.now()): State {
   syncLinks(state, now);
   const ids: Record<string, string> = {};
   for (const step of [...script, ...careScript(now), ...planScript(now)].sort((a, b) => b.at - a.at)) {
-    let action = typeof step.action === 'function' ? step.action(ids) : step.action;
+    let action = typeof step.action === 'function' ? step.action(ids, state) : step.action;
     if (action.type === 'toggle_check' && action.itemId === '__first') {
       const c = state.challenges.find((x) => x.id === (action as { id: string }).id);
       action = { ...action, itemId: c?.checklist[0]?.id ?? '' };
@@ -424,6 +438,8 @@ export function createSeed(now = Date.now()): State {
   // Start everyone with a clean inbox except the most recent, relevant items.
   const cutoff = now - 8 * H;
   state.notifications = state.notifications.filter((n) => n.at > cutoff);
+  // Monitoring ran while the history was replayed; keep only what is still open or recent.
+  state.alerts = state.alerts.filter((a) => !a.resolvedAt || a.resolvedAt > now - 48 * H);
   sweep(state, now);
   return state;
 }

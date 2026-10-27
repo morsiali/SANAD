@@ -6,6 +6,7 @@ import { useApp } from '../lib/store';
 import { t } from '../lib/i18n';
 import { ActionProvider } from './actions';
 import { AssistantProvider, useAssistant, usePageContext } from './assistant';
+import { isDue } from './monitoring';
 import { LangToggle } from '../lib/lang';
 import { Avatar, Icon, Logo, Sparkle } from './ui';
 
@@ -55,7 +56,8 @@ function Frame() {
     return () => document.removeEventListener('mousedown', close);
   }, [menu]);
 
-  const unread = view.notifications.filter((n) => !n.read).length;
+  // Notifications held for quiet hours are not counted until the quiet hours end.
+  const unread = view.notifications.filter((n) => isDue(n, Date.now())).length;
   const mine = view.challenges.filter((c) => c.assigneeId === me.id && isActive(c)).length;
   const toConfirm = view.challenges.filter((c) => c.stage === 'resolved' && (c.reporterId === me.id || (isHousehold(me.role) && me.recipients.includes(c.recipientId)))).length;
   const approvalsForMe = view.approvals.filter((a) => a.status === 'pending' && a.approverIds.includes(me.id) && a.expiresAt >= Date.now()).length + view.invites.filter((i) => i.status === 'pending' && i.email === me.email.toLowerCase() && i.expiresAt > Date.now()).length;
@@ -68,6 +70,7 @@ function Frame() {
     ...(isAdmin ? [] : [{ to: '/app/today', icon: 'sun', label: 'Today' }]),
     { to: '/app/people', icon: 'heart', label: peopleLabel },
     ...(isAdmin ? [] : [{ to: '/app/calendar', icon: 'calendar', label: 'Calendar' }]),
+    ...(isAdmin ? [] : [{ to: '/app/forecast', icon: 'clock', label: 'Coming up' }]),
     ...(isAdmin ? [] : [{ to: '/app/challenges', icon: 'layers', label: 'Challenges', badge: mine + toConfirm + triage || undefined }]),
     ...(isAdmin ? [] : [{ to: '/app/report', icon: 'plus', label: 'Report a challenge' }]),
     { to: '/app/approvals', icon: 'shield', label: 'Approvals', badge: approvalsForMe || undefined },

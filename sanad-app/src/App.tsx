@@ -1,4 +1,5 @@
 import { HashRouter, Link, Route, Routes } from 'react-router-dom';
+import { ForecastPage } from './pages/Forecast';
 import { AppProvider } from './lib/store';
 import { Shell } from './components/Shell';
 import { Empty, Toasts } from './components/ui';
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="approvals" element={<Approvals />} />
             <Route path="today" element={<Today />} />
             <Route path="calendar" element={<Calendar />} />
+            <Route path="forecast" element={<ForecastPage />} />
             <Route path="workflow" element={<WorkflowPage />} />
             <Route path="intelligence" element={<Intelligence />} />
             <Route path="playbooks" element={<Playbooks />} />

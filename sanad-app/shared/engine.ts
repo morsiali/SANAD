@@ -17,10 +17,13 @@ import {
   type View,
 } from './types';
 import { computeLoads, decideRouting, isActive, selectAssignee } from './routing';
+import { quietUntil, type NotifyGroup } from './notify';
 import { en, msg } from './messages';
 import { cleanProfile, type ProfileInput } from './care';
 import { audit, dispatch, expireCare, linkMember, syncLinks, unlinkMember, type CareCtx } from './care-engine';
 import { canSeeTask, sweepPlans } from './plans-engine';
+import { monitor, visibleAlert } from './monitor';
+import { cleanPrefs } from './notify';
 import { AUTHORITY_DOMAINS, DOMAINS, ROLE_DOMAINS, canManageTeam, canWrite, domainsFor, isLive, isMinor, isOrgStaff } from './access';
 
 export const fail = (k: string, p?: Record<string, string | number | Msg>, status = 400) => {
@@ -96,13 +99,33 @@ export function notify(
   kind: Notification['kind'],
   now: number,
   exclude?: string,
+  opts: { urgent?: boolean; group?: NotifyGroup; link?: string } = {},
 ) {
   const seen = new Set<string>();
+  // Escalations, new assignments and system notices always arrive; routine groups can be muted by the person.
+  const group: NotifyGroup = opts.group ?? (kind === 'escalation' || kind === 'assigned' || kind === 'system' ? 'always' : 'updates');
+  const urgent = opts.urgent ?? (kind === 'escalation' || c?.priority === 'urgent');
   for (const id of userIds) {
     if (!id || id === exclude || seen.has(id)) continue;
-    if (!state.users.some((u) => u.id === id)) continue;
+    const u = state.users.find((x) => x.id === id);
+    if (!u) continue;
     seen.add(id);
-    state.notifications.unshift({ id: nextId(state, 'n'), userId: id, challengeId: c?.id ?? null, text: en(m), m, at: now, read: false, kind });
+    if (group !== 'always' && !urgent && u.prefs?.muted.includes(group)) continue;
+    // During quiet hours a notification is kept silently until they end, unless it is urgent and the person allows urgent items through.
+    const held = urgent && u.prefs?.urgentThrough !== false ? null : quietUntil(u.prefs, now);
+    state.notifications.unshift({
+      id: nextId(state, 'n'),
+      userId: id,
+      challengeId: c?.id ?? null,
+      text: en(m),
+      m,
+      at: now,
+      read: false,
+      kind,
+      ...(held ? { heldUntil: held } : {}),
+      ...(urgent ? { urgent: true } : {}),
+      ...(opts.link ? { link: opts.link } : {}),
+    });
   }
   if (state.notifications.length > 600) state.notifications.length = 600;
 }
@@ -492,6 +515,13 @@ export function apply(prev: State, actorId: string, action: Action, now = Date.n
       break;
     }
 
+    case 'update_notify_prefs': {
+      const prefs = cleanPrefs(action.prefs);
+      if (!prefs) throw fail('e_prefs');
+      me.prefs = prefs;
+      m = msg('m_prefs_saved');
+      break;
+    }
     case 'update_profile': {
       me.name = requireText(action.name, 'lbl_name_you', 2);
       me.title = (action.title ?? '').trim();
@@ -702,6 +732,7 @@ function pickUpQueue(state: State, now: number): number {
 export function sweep(state: State, now = Date.now()): boolean {
   let changed = expireCare(state, now);
   if (sweepPlans(state, now)) changed = true;
+  if (monitor(state, now)) changed = true;
   if (state.settings.autoEscalate) {
     for (const c of state.challenges) {
       if (isActive(c) && !c.escalated && c.dueAt < now) {
@@ -744,7 +775,8 @@ export function viewFor(state: State, userId: string, now = Date.now()): View {
     schema: state.schema,
     seq: state.seq,
     me: userId,
-    users: state.users.map((u) => ({ ...u, recipients: u.recipients.filter((r) => visible.has(r)) })),
+    // Other people's notification settings stay private.
+    users: state.users.map((u) => ({ ...u, recipients: u.recipients.filter((r) => visible.has(r)), prefs: u.id === userId ? u.prefs : undefined })),
     recipients,
     challenges,
     rules: state.rules,
@@ -769,22 +801,34 @@ export function viewFor(state: State, userId: string, now = Date.now()): View {
     appointments: state.appointments.filter((a) => can(a.recipientId, a.domain)),
     // File contents stored on the server are never part of the view; they are fetched one by one, with a fresh permission check.
     documents: state.documents.filter((d) => can(d.recipientId, d.domain)).map((d) => ({ ...d, fileKey: undefined })),
+    alerts: state.alerts.filter((a) => visibleAlert(a, userId, can)),
+    standing: state.standing.filter((p) => can(p.recipientId, 'team') || p.grantedBy === userId || p.ownerId === userId),
+    proposals: state.proposals.filter((p) => {
+      const t = state.tasks.find((x) => x.id === p.taskId);
+      return !!t && canSeeTask(state, userId, t, now);
+    }),
   };
 }
 
 /** Upgrades saved data from before care teams and records existed. Adds, never removes. */
 export function upgrade(state: State, now = Date.now()): State {
-  if ((state.schema ?? 1) >= 3) return state;
   const s = state as State & Partial<State>;
+  // Schema 4: monitoring alerts, standing permissions and adaptation proposals (all start empty).
+  const schema4 = () => {
+    s.alerts ??= [];
+    s.standing ??= [];
+    s.proposals ??= [];
+    s.schema = 4;
+    return s;
+  };
+  if ((state.schema ?? 1) >= 4) return state;
+  if ((state.schema ?? 1) >= 3) return schema4();
   // Schema 3: plans, tasks, appointments and documents.
   s.plans ??= [];
   s.tasks ??= [];
   s.appointments ??= [];
   s.documents ??= [];
-  if ((state.schema ?? 1) >= 2) {
-    s.schema = 3;
-    return s;
-  }
+  if ((state.schema ?? 1) >= 2) return schema4();
   s.orgs ??= [{ id: 'org-hub', name: 'SANAD Care Hub' }];
   s.memberships ??= [];
   s.invites ??= [];
@@ -811,8 +855,7 @@ export function upgrade(state: State, now = Date.now()): State {
       s.consents.push({ id: `k${s.seq.toString(36)}`, recipientId: rid, subjectId: u.id, change: 'grant', domains, basis: 'recorded', givenBy: 'system', evidence: 'Carried over from the care links that existed before permissions were added', at: now });
     }
   }
-  s.schema = 3;
-  return s;
+  return schema4();
 }
 
 export const PALETTE = ['#476ADB', '#1F9E8F', '#C9861A', '#7A5AC8', '#D2566B', '#3E8E3A', '#2B7BB9', '#9A6B3F'];

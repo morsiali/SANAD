@@ -6,6 +6,7 @@ import { kindOf, slotTime, sourceFor } from './records';
 import { fail, nextId, notify, requireText } from './engine';
 import { msg } from './messages';
 import { applyPlans, planVersion } from './plans-engine';
+import { applyMonitor } from './monitor';
 
 export interface CareCtx {
   /** Set when an approved request is being carried out. */
@@ -148,7 +149,7 @@ const fallbackCode = (state: State) => `inv${state.seq.toString(36)}${(state.seq
 
 /** Runs any registered action (care-team actions here, plus plan/task/appointment actions). */
 export function dispatch(state: State, me: User, action: Action, now: number, ctx: CareCtx = {}): CareResult | null {
-  return applyCare(state, me, action, now, ctx) ?? applyPlans(state, me, action, now, ctx);
+  return applyCare(state, me, action, now, ctx) ?? applyPlans(state, me, action, now, ctx) ?? applyMonitor(state, me, action, now);
 }
 
 export function applyCare(state: State, me: User, action: Action, now: number, ctx: CareCtx = {}): CareResult | null {

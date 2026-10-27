@@ -10,6 +10,7 @@ import { DOSE_STATUS_LABEL, RECORD_KINDS } from './records';
 import { TASK_STATUS_LABEL } from './plans';
 import { contentAr } from './ar-content';
 import { ASSIST_AR, ASSIST_EN } from './assistant-messages';
+import { MONITOR_AR, MONITOR_EN } from './monitor-messages';
 
 export type Lang = 'en' | 'ar';
 export type Params = Record<string, string | number | Msg>;
@@ -117,6 +118,8 @@ export const STATUS_EN: Record<string, string> = {
   expired: 'expired',
   failed: 'could not be done',
   cancelled: 'cancelled',
+  accepted: 'accepted',
+  dismissed: 'dismissed',
 };
 export const STATUS_AR: Record<string, string> = {
   draft: 'مسودة',
@@ -135,6 +138,8 @@ export const STATUS_AR: Record<string, string> = {
   expired: 'منتهي الصلاحية',
   failed: 'تعذر إكماله',
   cancelled: 'ملغى',
+  accepted: 'مقبول',
+  dismissed: 'متجاهَل',
 };
 const AUTHORITY_TXT: Record<string, [string, string]> = { self: ['their own authority', 'صلاحيته الشخصية'], guardian: ['guardian authority', 'صلاحية الوصي'], none: ['no authority', 'بلا صلاحية'] };
 const KIND_EN: Record<string, string> = Object.fromEntries(RECORD_KINDS.map((k) => [k.kind, k.label]));
@@ -1040,8 +1045,8 @@ const AR: Record<string, string> = {
   x_who_suffix: ' ({name})',
 };
 
-Object.assign(EN, ASSIST_EN);
-Object.assign(AR, ASSIST_AR);
+Object.assign(EN, ASSIST_EN, MONITOR_EN);
+Object.assign(AR, ASSIST_AR, MONITOR_AR);
 
 /** Arabic counted nouns: 1, 2, 3–10 and 11+ take different forms. */
 const arCount = (n: number, one: string, two: string, few: string, many: string) => (n === 1 ? one : n === 2 ? two : n >= 3 && n <= 10 ? `${n} ${few}` : `${n} ${many}`);
@@ -1053,9 +1058,22 @@ export function hasKey(k: string) {
   return k in EN;
 }
 
+// Titles SANAD writes itself (automatic tasks, review requests) are built from a fixed prefix and translated the same way.
+const CONTENT_PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
+  [/^Record what happened: (.+)$/, (m) => `سجّل ما حدث: ${contentAr[m[1]] ?? m[1]}`],
+  [/^Arrange a refill: (.+)$/, (m) => `رتّب إعادة صرف: ${contentAr[m[1]] ?? m[1]}`],
+  [/^About ([\d.]+) days of supply left by the recorded schedule\. Created by SANAD under a standing permission\.$/, (m) => `يكفي المخزون نحو ${m[1]} يوم حسب الجدول المسجل. أنشأها سند بموجب إذن دائم.`],
+];
+
 export function txContent(text: string, lang: Lang): string {
   if (lang !== 'ar') return text;
-  return contentAr[text] ?? text;
+  const direct = contentAr[text];
+  if (direct) return direct;
+  for (const [re, fn] of CONTENT_PATTERNS) {
+    const m = text.match(re);
+    if (m) return fn(m);
+  }
+  return text;
 }
 
 function renderParam(key: string, v: string | number | Msg, lang: Lang): string {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Notification } from '../../shared/types';
 import { useSession } from '../lib/store';
-import { t, tc, tm, tn } from '../lib/i18n';
+import { locale, t, tc, tm, tn } from '../lib/i18n';
 import { timeAgo } from '../lib/format';
 import { Empty, Icon } from '../components/ui';
 
@@ -25,6 +25,7 @@ export function Inbox() {
   const open = async (n: Notification) => {
     if (!n.read) await act({ type: 'mark_read', notificationId: n.id }, { quiet: true });
     if (n.challengeId && view.challenges.some((c) => c.id === n.challengeId)) return nav(`/app/challenges/${n.challengeId}`);
+    if (n.link) return nav(n.link);
     const k = n.m?.k ?? '';
     if (k.startsWith('n_approval') || k === 'n_invited') return nav('/app/approvals');
     if (k === 'n_dose_missed' || k === 'n_access_changed' || k === 'n_joined_team' || k === 'n_authority_verified') return nav('/app/people');
@@ -57,7 +58,11 @@ export function Inbox() {
                   <span className="note-icon">
                     <Icon name={KIND_ICON[n.kind]} size={16} />
                   </span>
-                  <span className="note-text">{n.m ? tm(n.m) : n.text}</span>
+                  <span className="note-text">
+                    {n.m ? tm(n.m) : n.text}
+                    {n.heldUntil && n.heldUntil > now && <em className="note-held"> · {t('Held for your quiet hours until {time}', { time: new Date(n.heldUntil).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) })}</em>}
+                    {n.urgent && <em className="note-urgent"> · {t('Urgent')}</em>}
+                  </span>
                   <small>{timeAgo(n.at, now)}</small>
                 </button>
               </li>
