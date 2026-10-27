@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AskButton } from '../components/assistant';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import type { Domain, Recipient } from '../../shared/types';
 import { isActive } from '../../shared/routing';
@@ -7,7 +8,7 @@ import { useSession } from '../lib/store';
 import { t, tc, tm } from '../lib/i18n';
 import { dateTime, timeAgo } from '../lib/format';
 import { alertsFor, lastUpdate, myMembership, nextDose, profileTabs } from '../lib/people';
-import { ChallengeRow, Empty, Field, Icon, Modal } from '../components/ui';
+import { ChallengeRow, Empty, Field, Icon, Modal, Sparkle } from '../components/ui';
 import { CareTags } from '../components/CareProfile';
 import { MedicationPanel, RecordSection } from '../components/records';
 import { CareTeamPanel } from '../components/careteam';
@@ -127,6 +128,17 @@ function Overview({ r }: { r: Recipient }) {
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+        {me.role !== 'admin' && (
+          <section className="panel assist-strip" aria-label={t('Ask the assistant about {name}', { name: tc(r.name) })}>
+            <Sparkle size={18} />
+            <span className="small">{t('The assistant can summarise, check for gaps or prepare a handover — using only what you can see.')}</span>
+            <div className="row gap-s wrap">
+              <AskButton label={t('What changed this week?')} question={t('What changed for {name} this week?', { name: tc(r.name) })} intent="summary" recipientId={r.id} />
+              <AskButton label={t('What’s missing?')} question={t('What is missing in {name}’s profile?', { name: tc(r.name) })} intent="missing" recipientId={r.id} />
+              {(me.role === 'caregiver' || me.role === 'family') && <AskButton label={t('Prepare a handover')} question={t('Prepare a handover for {name}', { name: tc(r.name) })} intent="handover" recipientId={r.id} />}
+            </div>
           </section>
         )}
         <section className="panel" aria-labelledby="latest-h">

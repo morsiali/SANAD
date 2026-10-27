@@ -7,6 +7,7 @@ import { msg } from '../../shared/messages';
 import { createSeed } from '../../shared/seed';
 import type { Action, Domain, Msg, Role, State, View } from '../../shared/types';
 import { domainsFor } from '../../shared/access';
+import { assist, PERSON_INTENTS, type AssistantAnswer, type AssistRequest } from '../../shared/assistant';
 
 export interface InviteInfo {
   role: Role;
@@ -64,6 +65,9 @@ export interface Backend {
   uploadDocument(token: string, input: UploadInput): Promise<ActResult>;
   /** Fetches a document's file after a fresh permission check. */
   openDocument(token: string, documentId: string): Promise<Blob>;
+  /** Asks the assistant. Read-only: it never changes anything. */
+  assistant(token: string, req: AssistRequest, lang: 'en' | 'ar'): Promise<AssistantAnswer>;
+  assistantStatus(token: string): Promise<{ model: boolean; name: string | null }>;
 }
 
 export interface UploadInput {
@@ -128,6 +132,8 @@ function serverBackend(): Backend {
       }
       return res.blob();
     },
+    assistant: (token, req, lang) => call('/api/assistant', { method: 'POST', token, body: JSON.stringify({ ...req, lang }) }),
+    assistantStatus: (token) => call('/api/assistant/status', { token }),
     subscribe(token, onChange) {
       let es: EventSource | null = null;
       let closed = false;
@@ -311,6 +317,18 @@ function browserBackend(): Backend {
       write(s, false);
       return (await fetch(d.dataUrl)).blob();
     },
+    // The browser demo runs SANAD's rule-based assistant locally on the same filtered view. No AI model is used here.
+    async assistant(token, req) {
+      const me = userFromToken(token);
+      const s = read();
+      const now = Date.now();
+      const intent = req.intent && PERSON_INTENTS.includes(req.intent) ? req.intent : undefined;
+      const answer = assist(viewFor(s, me, now), { ...req, intent }, now);
+      audit(s, me, answer.recipientId, 'team', 'assistant', msg('au_assistant', { actor: s.users.find((u) => u.id === me)?.name ?? '', intent: `@as_i_${answer.intent}`, n: answer.sources.length }), now);
+      write(s, false);
+      return answer;
+    },
+    assistantStatus: async () => ({ model: false, name: null }),
   };
 }
 

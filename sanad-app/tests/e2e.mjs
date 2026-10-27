@@ -302,11 +302,12 @@ await step('Ask SANAD answers questions with live cards', async () => {
   await sara.waitForURL(/report\?title=/);
   if ((await sara.getByLabel('What’s the problem?').inputValue()).length < 4) throw new Error('report not prefilled');
 });
-await step('top bar question jumps to Ask SANAD', async () => {
+await step('top bar question opens the assistant beside the page', async () => {
   await go(sara, '/app');
   await sara.locator('.topbar').getByLabel('Ask SANAD').fill('How is Hamad doing?');
   await sara.locator('.topbar').getByLabel('Ask SANAD').press('Enter');
-  await text(sara, 'Hamad has');
+  await sara.locator('.assist-panel').getByText('Here is what was recorded for Abu Khalid').waitFor();
+  await sara.locator('.assist-panel').getByRole('button', { name: 'Close the assistant' }).click();
 });
 await step('insights: time ranges and table view', async () => {
   await go(sara, '/app/analytics');
@@ -807,6 +808,95 @@ await step('public workflow page works without signing in', async () => {
   await p.context().close();
 });
 
+console.log('\nAssistant');
+const panel = (p) => p.locator('.assist-panel');
+await step('summary from the profile: cited, scoped, sources open where they live', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/people/r-fatima');
+  await btn(p, 'What changed this week?').click();
+  await panel(p).getByText('Here is what was recorded for Umm Mariam').waitFor();
+  await panel(p).getByText('Built only from the sections you can see').first().waitFor();
+  await panel(p).locator('summary', { hasText: /Sources \(\d+\)/ }).first().waitFor();
+  const n = await panel(p).locator('a.cite').count();
+  if (n < 5) throw new Error(`only ${n} citations`);
+  await panel(p).locator('a.cite').first().click();
+  await p.waitForURL(/people\/r-fatima/);
+  await p.context().close();
+});
+await step('appointment brief saved as an AI-labelled document only after confirming (scenario 2)', async () => {
+  const p = await person('mariam@sanad.ae');
+  await go(p, '/app/people/r-fatima?tab=appointments');
+  await p.locator('.appt', { hasText: 'Diabetes review call' }).getByRole('button', { name: 'Prepare a brief' }).click();
+  await panel(p).getByText('Brief for “Diabetes review call”').waitFor();
+  await panel(p).getByText('Current medicines (as recorded)').waitFor();
+  await panel(p).getByRole('button', { name: 'Save this brief to Documents' }).click();
+  await panel(p).getByText('Nothing has been created or sent yet.').waitFor();
+  await panel(p).getByRole('button', { name: 'Confirm and save' }).click();
+  await panel(p).getByText('All steps were completed and confirmed by SANAD.').waitFor();
+  await go(p, '/app/people/r-fatima?tab=documents');
+  await p.locator('.doc', { hasText: 'Brief: Diabetes review call' }).getByText('AI-generated summary').waitFor();
+  await p.context().close();
+});
+await step('plan draft is edited, confirmed step by step and appears in the plan list', async () => {
+  const p = await person('faisal@sanad.ae');
+  await go(p, '/app/people/r-khadija?tab=plans');
+  await btn(p, 'Draft a plan with SANAD').click();
+  const card = panel(p).locator('.draft-card').last();
+  await card.waitFor();
+  await card.getByLabel('Plan title').fill('Walking routine, weeks 6 to 8');
+  await card.getByRole('button', { name: 'Confirm and create' }).click();
+  await card.getByText('All steps were completed and confirmed by SANAD.').waitFor();
+  if (await card.getByLabel('Plan title').isEnabled()) throw new Error('draft still editable after confirming');
+  await p.locator('main').getByText('Walking routine, weeks 6 to 8').first().waitFor();
+  await p.context().close();
+});
+await step('clinical questions are declined and become a review request', async () => {
+  const p = await person('aisha@sanad.ae');
+  await go(p, `/app/intelligence?q=${encodeURIComponent('Should Fatima take an extra insulin dose?')}`);
+  await p.getByText('I can’t advise on starting, stopping or changing medicines').waitFor();
+  await p.getByRole('button', { name: 'Confirm and send the request' }).click();
+  await p.getByText('All steps were completed and confirmed by SANAD.').waitFor();
+  await p.context().close();
+});
+await step('a physiotherapist asking about medicines gets no medical information', async () => {
+  const p = await person('faisal@sanad.ae');
+  await p.getByRole('search').getByRole('textbox').fill('What medicines does Khadija take?');
+  await p.keyboard.press('Enter');
+  await panel(p).getByText('You can’t see the medical section for Khadija.').waitFor();
+  if (await panel(p).locator('a.cite').count()) throw new Error('citations shown');
+  await p.context().close();
+});
+await step('emergency wording gets a call-for-help alert only', async () => {
+  const p = await person('khalid@sanad.ae');
+  await go(p, `/app/intelligence?q=${encodeURIComponent('Dad collapsed and has chest pain')}`);
+  await p.getByRole('alert').getByText('call your local emergency number now').waitFor();
+  await p.context().close();
+});
+await step('suggestions explain why they are shown; admins have no assistant', async () => {
+  const p = await person('huda@sanad.ae');
+  await go(p, '/app/people/r-rashid?tab=progress');
+  await p.locator('.assist-fab').click();
+  await panel(p).getByText('Suggested for this page').waitFor();
+  await panel(p).getByRole('button', { name: 'Why am I seeing this?' }).first().click();
+  await panel(p).getByText('You are looking at the progress charts.').waitFor();
+  await p.keyboard.press('Escape');
+  if (await panel(p).isVisible()) throw new Error('panel did not close');
+  await p.context().close();
+  const a = await person('majid@sanad.ae');
+  if (await a.locator('.assist-fab').count()) throw new Error('admin sees the assistant');
+  await a.context().close();
+});
+await step('assistant on a phone: full-width panel, no sideways scrolling', async () => {
+  const p = await person('khadija@sanad.ae', { width: 390, height: 844 });
+  await go(p, '/app/people/r-khadija?tab=progress');
+  await p.locator('.assist-fab').click();
+  await panel(p).getByRole('button', { name: /Explain/ }).first().click();
+  await panel(p).getByText('Recorded values for Khadija').waitFor();
+  const overflow = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  if (overflow) throw new Error('horizontal scroll');
+  await p.context().close();
+});
+
 console.log('\nArabic');
 const englishLeft = async (page) =>
   page.evaluate(() => {
@@ -820,7 +910,7 @@ const englishLeft = async (page) =>
       if (!r.width && !r.height) continue;
       const typed = /^(Hessa|Ali|Reem|Salem|Saleh|Jumeirah|Dubai)$/; // names and places typed by people who signed up during this run
       if (n.nodeValue.trim() === 'Dialysis on Mondays and Thursdays. Lives alone.') continue; // a care note typed during this run
-      if (['Calm after swimming', 'Check the inhaler technique', 'Podiatry check', 'Results shared with Huda', 'Term report', 'term-report.pdf', 'Sam Coach', 'Swimming coach', 'End of school year', 'Pain after evening set', 'Salem Rashid', 'Weekend relief carer'].some((x) => n.nodeValue.includes(x))) continue; // typed during this run
+      if (['Calm after swimming', 'Check the inhaler technique', 'Podiatry check', 'Results shared with Huda', 'Term report', 'term-report.pdf', 'Sam Coach', 'Swimming coach', 'End of school year', 'Pain after evening set', 'Salem Rashid', 'Weekend relief carer', 'Professional review', 'Walking routine, weeks 6 to 8', 'Brief: Diabetes review call'].some((x) => n.nodeValue.includes(x))) continue; // typed during this run
       const words = n.nodeValue.split(/[\s·,()“”«»:]+/).map((x) => x.replace(/[.؛،]+$/, '')).filter((x) => /[A-Za-z]{3,}/.test(x) && !typed.test(x) && !/^(SAN-\d+|SANAD|English|sanad123|[\w.]+@[\w.]+|mmol\/L|JSON|SAN|PDF|CSV|PNG|JPEG|WebP)$/.test(x));
       if (words.length) out.push(n.nodeValue.trim());
     }
@@ -909,6 +999,29 @@ await step('profile sections read fully in Arabic (guardian and psychologist)', 
     await ctx.close();
   }
   if (leftovers.length) throw new Error(`English left: ${[...new Set(leftovers)].slice(0, 6).join(' | ')}`);
+});
+
+await step('assistant answers fully in Arabic', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+  await ctx.addInitScript(() => localStorage.setItem('sanad.lang', 'ar'));
+  const p = await ctx.newPage();
+  await go(p, '/signin');
+  await p.fill('input[type=email]', 'mariam@sanad.ae');
+  await p.fill('input[type=password]', 'sanad123');
+  await p.click('form button[type=submit]');
+  await p.waitForURL(/#\/app/);
+  await p.locator('.side-nav').waitFor();
+  await go(p, '/app/people/r-fatima');
+  await p.getByRole('button', { name: 'ماذا تغيّر هذا الأسبوع؟' }).click();
+  await p.locator('.assist-panel').getByText('هذا ما سُجّل لـأم مريم').waitFor();
+  await p.locator('.assist-panel summary').first().click();
+  await go(p, '/app/people/r-fatima?tab=appointments');
+  await p.locator('.appt').first().getByRole('button', { name: 'حضّر ملخصًا' }).click();
+  await p.locator('.assist-panel .answer').nth(1).waitFor();
+  await p.waitForTimeout(300);
+  const left = (await englishLeft(p)).filter((x) => !/^Umm Mariam$/.test(x));
+  if (left.length) throw new Error(`English left: ${[...new Set(left)].slice(0, 6).join(' | ')}`);
+  await ctx.close();
 });
 
 await browser.close();

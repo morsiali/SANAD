@@ -157,6 +157,8 @@ export function applyPlans(state: State, me: User, action: Action, now: number, 
       const r = recipientOf(state, action.recipientId);
       mayCreate(state, me, r, action.domain, now);
       const title = requireText(action.title, 'lbl_title', 3).slice(0, 140);
+      // Confirming the same draft twice must not create two plans.
+      if (state.plans.some((x) => x.recipientId === r.id && x.status === 'active' && x.title.toLowerCase() === title.toLowerCase())) throw fail('e_duplicate_plan', { title }, 409);
       const p = { id: nextId(state, 'c'), recipientId: r.id, title, goal: (action.goal ?? '').trim().slice(0, 1000), domain: action.domain, createdBy: me.id, createdAt: now, updatedAt: now, status: 'active' as const };
       state.plans.push(p);
       audit(state, me.id, r.id, p.domain, 'plan_added', msg('au_plan', { actor: me.name, title }), now, p.id);
@@ -561,6 +563,8 @@ export function applyPlans(state: State, me: User, action: Action, now: number, 
       const r = recipientOf(state, action.recipientId);
       mayCreate(state, me, r, action.domain, now);
       if (!DOC_TYPES[action.mime]) throw fail('e_doc_type');
+      // A brief prepared by the assistant is saved as plain text and labelled as AI-generated, never as a professional entry.
+      if (action.aiDraft && action.mime !== 'text/plain') throw fail('e_doc_type');
       const title = requireText(action.title, 'lbl_title', 3).slice(0, 140);
       const fileName = String(action.fileName ?? 'file').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 120) || 'file';
       let size = Number(action.size) || 0;
@@ -591,10 +595,10 @@ export function applyPlans(state: State, me: User, action: Action, now: number, 
         fileKey: storage === 'server' ? action.fileKey : undefined,
         uploadedBy: me.id,
         uploadedAt: now,
-        source: me.role === 'self' ? 'self' : ['doctor', 'psychologist', 'physio', 'educator'].includes(me.role) ? 'professional' : 'caregiver',
+        source: action.aiDraft ? 'ai' : me.role === 'self' ? 'self' : ['doctor', 'psychologist', 'physio', 'educator'].includes(me.role) ? 'professional' : 'caregiver',
       };
       state.documents.push(d);
-      audit(state, me.id, r.id, d.domain, 'doc_added', msg('au_doc', { actor: me.name, title }), now, d.id);
+      audit(state, me.id, r.id, d.domain, 'doc_added', msg(action.aiDraft ? 'au_doc_ai' : 'au_doc', { actor: me.name, title }), now, d.id);
       return { m: msg('m_doc_added', { title }), createdId: d.id };
     }
 

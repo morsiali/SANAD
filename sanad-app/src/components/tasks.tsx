@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { AskButton } from './assistant';
 import type { CarePlan, CareTask, Domain, Priority, Recurrence, TaskInput, User } from '../../shared/types';
 import { PRIORITIES } from '../../shared/types';
 import { DOMAIN_LABEL, hasAuthority } from '../../shared/access';
@@ -687,6 +688,7 @@ export function PlansPanel({ recipientId }: { recipientId: string }) {
                 <button type="button" className="btn btn-light btn-sm" onClick={() => setModal('plan')}>
                   {t('New care plan')}
                 </button>
+                <AskButton label={t('Draft a plan with SANAD')} question={t('Draft a plan for {name}', { name: tc(view.recipients.find((x) => x.id === recipientId)?.name ?? '') })} intent="plan" recipientId={recipientId} />
                 {onTeam && (
                   <>
                     <button type="button" className="btn btn-light btn-sm" onClick={() => setModal('handover')}>

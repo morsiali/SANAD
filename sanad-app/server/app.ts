@@ -10,6 +10,8 @@ import { domainsFor } from '../shared/access';
 import { DOC_MAX_SERVER, DOC_TYPES, sniffMatches } from '../shared/plans';
 import { createSeed } from '../shared/seed';
 import { EngineError, type Action, type State } from '../shared/types';
+import { assist, PERSON_INTENTS, type AssistRequest, type Intent } from '../shared/assistant';
+import { MODEL_INTENTS, modelConfigFromEnv, modelConfigured, modelOverview, type ModelConfig } from './model';
 
 export const DEMO_PASSWORD = 'sanad123';
 
@@ -36,6 +38,8 @@ export interface AppOptions {
   dataFile?: string | null; // null = memory only (tests)
   staticDir?: string | null;
   sweepMs?: number;
+  /** AI model for the assistant's overview; defaults to the environment (off unless ANTHROPIC_API_KEY is set). */
+  model?: ModelConfig;
 }
 
 export function createApp(opts: AppOptions = {}) {
@@ -58,6 +62,9 @@ export function createApp(opts: AppOptions = {}) {
   }
 
   const rand = () => randomBytes(12).toString('base64url');
+  const modelCfg = opts.model ?? modelConfigFromEnv();
+  // Per-user request budget for the assistant.
+  const assistHits = new Map<string, number[]>();
 
   // Uploaded files live next to the data file (or in memory for tests), never inside the shared state.
   const filesDir = dataFile ? join(dirname(dataFile), 'files') : null;
@@ -264,6 +271,51 @@ export function createApp(opts: AppOptions = {}) {
     res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(buf);
+  });
+
+  // ---- assistant -----------------------------------------------------------
+  app.get('/api/assistant/status', auth, (_req, res) => {
+    res.json({ model: modelConfigured(modelCfg), name: modelConfigured(modelCfg) ? modelCfg.model : null });
+  });
+
+  // The assistant only ever sees this user's filtered view. It reads; it never changes anything.
+  app.post('/api/assistant', auth, async (req: AuthedRequest, res) => {
+    const userId = req.userId!;
+    const now = Date.now();
+    const hits = (assistHits.get(userId) ?? []).filter((t) => t > now - 60_000);
+    if (hits.length >= 30) return res.status(429).json({ error: 'Too many questions in a minute. Please wait a moment.', m: msg('e_assist_rate') });
+    hits.push(now);
+    assistHits.set(userId, hits);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const intent = typeof b.intent === 'string' && (PERSON_INTENTS as string[]).includes(b.intent) ? (b.intent as Intent) : undefined;
+    const request: AssistRequest = {
+      question: String(b.question ?? '').slice(0, 600),
+      recipientId: typeof b.recipientId === 'string' ? b.recipientId : null,
+      targetId: typeof b.targetId === 'string' ? b.targetId : null,
+      intent,
+    };
+    const lang = b.lang === 'ar' ? 'ar' : 'en';
+    try {
+      const answer = assist(viewFor(db.state, userId, now), request, now);
+      if (modelConfigured(modelCfg) && MODEL_INTENTS.has(answer.intent) && answer.blocks.some((x) => x.lines.length)) {
+        const r = await modelOverview(modelCfg, answer, request.question, lang);
+        if (r.ok) {
+          answer.overview = r.paragraphs;
+          answer.engine = 'model';
+          answer.modelNote = msg('as_model_used');
+        } else {
+          answer.modelNote = msg(r.reason === 'unavailable' ? 'as_model_unavailable' : 'as_model_rejected');
+        }
+      }
+      const actor = db.state.users.find((u) => u.id === userId)?.name ?? '';
+      audit(db.state, userId, answer.recipientId, 'team', 'assistant', msg('au_assistant', { actor, intent: `@as_i_${answer.intent}`, n: answer.sources.length }), now);
+      save();
+      res.json(answer);
+    } catch (e) {
+      if (e instanceof EngineError) return res.status(e.status).json({ error: e.message, m: e.m });
+      console.error(e);
+      res.status(500).json({ error: 'The assistant could not answer. Nothing was changed.' });
+    }
   });
 
   app.post('/api/password', auth, (req: AuthedRequest, res) => {

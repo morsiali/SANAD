@@ -1,9 +1,11 @@
 // Progress charts built only from recorded values the viewer may see. No combined "condition score",
 // no causal claims, neutral wording ("higher" / "lower", never "worse"), and a table for every chart.
+import { AskButton } from './assistant';
 import { useMemo, useState } from 'react';
 import type { CareRecord, RecordSource } from '../../shared/types';
 import { kindOf, SOURCE_LABEL } from '../../shared/records';
 import { isOpenTask } from '../../shared/plans';
+import { measureSeries, seriesGaps } from '../../shared/progress';
 import { useSession } from '../lib/store';
 import { locale, t, tc } from '../lib/i18n';
 import { dateTime } from '../lib/format';
@@ -26,20 +28,7 @@ const fmtDate = (at: number) => new Date(at).toLocaleDateString(locale(), { day:
 const num = (v: number) => v.toLocaleString(locale(), { maximumFractionDigits: 1 });
 const unitTxt = (u: string) => (u ? t(u) : '');
 
-/** Gaps much longer than the usual interval between readings, shown on the chart and in words. */
-function gaps(points: CareRecord[], until: number): { from: number; to: number }[] {
-  if (points.length < 2) return [];
-  const steps = points.slice(1).map((p, i) => p.observedAt - points[i].observedAt).sort((a, b) => a - b);
-  const median = steps[Math.floor(steps.length / 2)];
-  const limit = Math.max(7 * DAY, 3 * median);
-  const out: { from: number; to: number }[] = [];
-  points.slice(1).forEach((p, i) => {
-    if (p.observedAt - points[i].observedAt > limit) out.push({ from: points[i].observedAt, to: p.observedAt });
-  });
-  const last = points[points.length - 1].observedAt;
-  if (until - last > limit) out.push({ from: last, to: until });
-  return out;
-}
+const gaps = seriesGaps;
 
 function Marker({ source, x, y }: { source: RecordSource; x: number; y: number }) {
   // Shape shows who recorded the value, so the source is never told by colour alone.
@@ -323,20 +312,10 @@ export function ProgressPanel({ recipientId }: { recipientId: string }) {
   const { view, act, now } = useSession();
   const [days, setDays] = useState<number>(90);
   const from = days ? now - days * DAY : Math.min(now - 7 * DAY, ...view.records.filter((r) => r.recipientId === recipientId).map((r) => r.observedAt));
-  const series = useMemo(() => {
-    const map = new Map<string, Series>();
-    for (const r of view.records) {
-      if (r.recipientId !== recipientId || r.archived || r.value === null || r.value === undefined || r.observedAt < from || r.observedAt > now) continue;
-      const def = kindOf(r.kind);
-      if (!def?.measure) continue;
-      const key = r.kind === 'measurement' ? `${r.kind}|${r.title}|${r.unit}` : `${r.kind}|${r.unit}`;
-      if (!map.has(key)) map.set(key, { key, label: r.kind === 'measurement' ? tc(r.title) : t(def.label), unit: r.unit ?? '', kind: r.kind, domain: r.domain, points: [] });
-      map.get(key)!.points.push(r);
-    }
-    for (const s of map.values()) s.points.sort((a, b) => a.observedAt - b.observedAt);
-    const order = ['medical', 'wellbeing', 'academic', 'social', 'activity', 'rehab'];
-    return [...map.values()].sort((a, b) => order.indexOf(a.domain) - order.indexOf(b.domain) || a.label.localeCompare(b.label));
-  }, [view.records, recipientId, from, now]);
+  const series = useMemo<Series[]>(
+    () => measureSeries(view.records, recipientId, from, now).map((m) => ({ key: m.key, label: m.kind === 'measurement' ? tc(m.title) : t(m.title), unit: m.unit, kind: m.kind, domain: m.domain, points: m.points })),
+    [view.records, recipientId, from, now],
+  );
   const milestones = view.records
     .filter((r) => r.recipientId === recipientId && !r.archived && ['milestone', 'achievement', 'assessment'].includes(r.kind) && r.observedAt >= from)
     .sort((a, b) => b.observedAt - a.observedAt);
@@ -365,6 +344,9 @@ export function ProgressPanel({ recipientId }: { recipientId: string }) {
                 </button>
               ))}
             </div>
+            {series.length > 0 && (
+              <AskButton label={t('Explain these changes')} question={t('Explain the recorded changes for {name}, last {n} days', { name: tc(view.recipients.find((x) => x.id === recipientId)?.name ?? ''), n: days || 365 })} intent="progress" recipientId={recipientId} />
+            )}
             {series.length > 0 && (
               <button type="button" className="btn btn-light btn-sm" onClick={exportCsv}>
                 <Icon name="download" size={14} /> {t('Download CSV')}

@@ -9,6 +9,7 @@ import { DOMAIN_LABEL } from './access';
 import { DOSE_STATUS_LABEL, RECORD_KINDS } from './records';
 import { TASK_STATUS_LABEL } from './plans';
 import { contentAr } from './ar-content';
+import { ASSIST_AR, ASSIST_EN } from './assistant-messages';
 
 export type Lang = 'en' | 'ar';
 export type Params = Record<string, string | number | Msg>;
@@ -197,7 +198,7 @@ const EN: Record<string, string> = {
   ev_task_failed: 'Could not be done: {reason}',
   ev_task_resumed: 'Unblocked',
   ev_task_cancelled: 'Cancelled: {reason}',
-  ev_handover: 'Handover of the last {hours} hours',
+  ev_handover: 'Handover of the last {hours}',
   ev_cover_requested: 'Cover requested',
   ev_cover_taken: '{name} offered to cover',
   ev_task_escalated: 'Escalated: overdue',
@@ -651,7 +652,7 @@ const AR: Record<string, string> = {
   ev_task_failed: 'تعذر إنجازها: {reason}',
   ev_task_resumed: 'استؤنفت',
   ev_task_cancelled: 'أُلغيت: {reason}',
-  ev_handover: 'تسليم آخر {hours} ساعة',
+  ev_handover: 'تسليم آخر {hours}',
   ev_cover_requested: 'طُلبت تغطية',
   ev_cover_taken: 'عرض {name} التغطية',
   ev_task_escalated: 'صُعّدت: متأخرة',
@@ -1039,6 +1040,15 @@ const AR: Record<string, string> = {
   x_who_suffix: ' ({name})',
 };
 
+Object.assign(EN, ASSIST_EN);
+Object.assign(AR, ASSIST_AR);
+
+/** Arabic counted nouns: 1, 2, 3–10 and 11+ take different forms. */
+const arCount = (n: number, one: string, two: string, few: string, many: string) => (n === 1 ? one : n === 2 ? two : n >= 3 && n <= 10 ? `${n} ${few}` : `${n} ${many}`);
+
+const fmtAt = (v: number, lang: Lang, withTime: boolean) =>
+  new Date(v).toLocaleString(lang === 'ar' ? 'ar-AE-u-nu-latn' : 'en-GB', withTime ? { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short', year: 'numeric' });
+
 export function hasKey(k: string) {
   return k in EN;
 }
@@ -1049,7 +1059,13 @@ export function txContent(text: string, lang: Lang): string {
 }
 
 function renderParam(key: string, v: string | number | Msg, lang: Lang): string {
-  if (typeof v === 'number') return String(v);
+  if (typeof v === 'number') {
+    if (key === 'at' || key === 'at2') return fmtAt(v, lang, true);
+    if (key === 'day') return fmtAt(v, lang, false);
+    if (key === 'days') return lang === 'ar' ? arCount(v, 'يوم واحد', 'يومان', 'أيام', 'يومًا') : v === 1 ? 'day' : `${v} days`;
+    if (key === 'hours') return lang === 'ar' ? arCount(v, 'ساعة واحدة', 'ساعتان', 'ساعات', 'ساعة') : v === 1 ? 'hour' : `${v} hours`;
+    return String(v);
+  }
   if (typeof v === 'object') return renderMsg(v, lang);
   if (v.startsWith('@')) return renderMsg({ k: v.slice(1) }, lang);
   if (key === 'role' || key === 'role2') return lang === 'ar' ? ROLE_AR[v as Role] ?? v : ROLE_LABEL[v as Role] ?? v;
@@ -1060,6 +1076,8 @@ function renderParam(key: string, v: string | number | Msg, lang: Lang): string 
   if (key === 'domain') return lang === 'ar' ? DOMAIN_AR[v as Domain] ?? v : DOMAIN_LABEL[v as Domain]?.toLowerCase() ?? v;
   if (key === 'domains') return v.split(',').filter(Boolean).map((d) => (lang === 'ar' ? DOMAIN_AR[d as Domain] ?? d : DOMAIN_LABEL[d as Domain]?.toLowerCase() ?? d)).join(lang === 'ar' ? '، ' : ', ');
   if (key === 'roles') return v.split(',').filter(Boolean).map((r) => (lang === 'ar' ? ROLE_AR[r as Role] ?? r : ROLE_LABEL[r as Role]?.toLowerCase() ?? r)).join(lang === 'ar' ? ' أو ' : ' or ');
+  if (key === 'people') return v.split(', ').filter(Boolean).map((x) => txContent(x, lang)).join(lang === 'ar' ? '، ' : ', ');
+  if (key === 'Kind') return lang === 'ar' ? KIND_AR[v] ?? v : KIND_EN[v] ?? v;
   if (key === 'kind') return lang === 'ar' ? KIND_AR[v] ?? v : KIND_EN[v]?.toLowerCase() ?? v;
   if (key === 'status') return lang === 'ar' ? STATUS_AR[v] ?? v : STATUS_EN[v]?.toLowerCase() ?? v;
   if (key === 'authority') return AUTHORITY_TXT[v]?.[lang === 'ar' ? 1 : 0] ?? v;

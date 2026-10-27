@@ -1,3 +1,4 @@
+import { AskButton } from './assistant';
 import { useState } from 'react';
 import type { Appointment, AppointmentInput, AppointmentKind, Domain } from '../../shared/types';
 import { DOMAIN_LABEL, hasAuthority } from '../../shared/access';
@@ -96,6 +97,9 @@ export function AppointmentCard({ a, showPerson = false }: { a: Appointment; sho
           </details>
         )}
         <div className="row gap-s wrap">
+          {a.status === 'scheduled' && a.endAt >= now && (
+            <AskButton className="btn btn-light btn-sm" label={t('Prepare a brief')} question={t('Prepare a brief for {title}', { title: tc(a.title) })} intent="appointment_brief" recipientId={a.recipientId} targetId={a.id} />
+          )}
           {a.status === 'scheduled' && (
             <button type="button" className="btn btn-ghost btn-sm" title={t('Downloads a calendar file for your own calendar app')} onClick={() => downloadIcs(a, tc(person?.name ?? ''))}>
               <Icon name="calendar" size={14} /> {t('Add to my calendar')}

@@ -518,7 +518,7 @@ export type Action =
   | { type: 'add_appointment'; recipientId: string; appt: AppointmentInput; prep: string[]; allowConflict?: boolean }
   | { type: 'edit_appointment'; appointmentId: string; baseVersion: number; appt: AppointmentInput; allowConflict?: boolean }
   | { type: 'appointment_status'; appointmentId: string; status: 'completed' | 'cancelled' | 'missed'; outcome?: string }
-  | { type: 'add_document'; recipientId: string; domain: Domain; title: string; description: string; fileName: string; mime: string; size: number; dataUrl?: string; fileKey?: string }
+  | { type: 'add_document'; recipientId: string; domain: Domain; title: string; description: string; fileName: string; mime: string; size: number; dataUrl?: string; fileKey?: string; aiDraft?: boolean }
   | { type: 'archive_document'; documentId: string; reason: string }
   | { type: 'note_export'; recipientId: string; what: 'progress' }
   | { type: 'cancel_approval'; approvalId: string };

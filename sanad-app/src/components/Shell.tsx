@@ -5,6 +5,7 @@ import { isActive } from '../../shared/routing';
 import { useApp } from '../lib/store';
 import { t } from '../lib/i18n';
 import { ActionProvider } from './actions';
+import { AssistantProvider, useAssistant, usePageContext } from './assistant';
 import { LangToggle } from '../lib/lang';
 import { Avatar, Icon, Logo, Sparkle } from './ui';
 
@@ -14,7 +15,9 @@ export function Shell() {
   if (!token || !view || !me) return <Navigate to="/signin" replace />;
   return (
     <ActionProvider>
-      <Frame />
+      <AssistantProvider>
+        <Frame />
+      </AssistantProvider>
     </ActionProvider>
   );
 }
@@ -32,6 +35,8 @@ function Frame() {
   const { view, me, signOut } = useApp() as ReturnType<typeof useApp> & { view: NonNullable<ReturnType<typeof useApp>['view']>; me: NonNullable<ReturnType<typeof useApp>['me']> };
   const nav = useNavigate();
   const loc = useLocation();
+  const assistant = useAssistant();
+  const page = usePageContext();
   const [drawer, setDrawer] = useState(false);
   const [menu, setMenu] = useState(false);
   const [q, setQ] = useState('');
@@ -76,10 +81,15 @@ function Frame() {
     { to: '/app/settings', icon: 'settings', label: 'Settings' },
   ];
 
+  // The top search box opens the assistant beside the current page, aware of the person being viewed.
   const onAsk = (e: FormEvent) => {
     e.preventDefault();
-    if (!q.trim()) return nav('/app/intelligence');
-    nav(`/app/intelligence?q=${encodeURIComponent(q.trim())}`);
+    if (isAdmin) return;
+    if (loc.pathname.startsWith('/app/intelligence')) {
+      nav(q.trim() ? `/app/intelligence?q=${encodeURIComponent(q.trim())}` : '/app/intelligence');
+    } else {
+      assistant.open(q.trim() ? { question: q.trim(), recipientId: page.recipientId } : undefined);
+    }
     setQ('');
   };
 
@@ -129,11 +139,11 @@ function Frame() {
           <button type="button" className="icon-btn burger" onClick={() => setDrawer(true)} aria-label="Open menu">
             <Icon name="menu" />
           </button>
-          <form className="ask" onSubmit={onAsk} role="search">
+          {!isAdmin && <form className="ask" onSubmit={onAsk} role="search">
             <Sparkle size={16} />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask SANAD — “what should I focus on next?”" aria-label="Ask SANAD" />
             <kbd>Enter</kbd>
-          </form>
+          </form>}
           <div className="top-right">
             {!isAdmin && (
               <Link to="/app/report" className="btn btn-dark btn-sm top-report">
@@ -177,7 +187,7 @@ function Frame() {
             </div>
           </div>
         </header>
-        <main id="main" className="content">
+        <main id="main" className={`content ${assistant.isOpen ? 'content-with-assist' : ''}`}>
           <Outlet />
         </main>
       </div>
